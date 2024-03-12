@@ -1,15 +1,23 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::io::prelude::*;
 use std::net::TcpStream;
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub struct TimeVal {
     pub sec: i32,
     pub usec: i32,
 }
 
+impl From<&[u8]> for TimeVal {
+    fn from(buf: &[u8]) -> TimeVal {
+        TimeVal {
+            sec: slice_to_i32(&buf[0..4]),
+            usec: slice_to_i32(&buf[4..8]),
+        }
+    }
+}
 #[repr(u16)]
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub enum MessageType {
     Base = 0,
     CodecHeader = 1,
@@ -19,6 +27,14 @@ pub enum MessageType {
     Hello = 5,
     StreamTags = 6,
     ClientInfo = 7,
+}
+
+#[derive(Debug)]
+enum ServerMessage<'a> {
+    ServerSettings(ServerSettings),
+    CodecHeader(CodecHeader<'a>),
+    WireChunk(WireChunk<'a>),
+    Time(Time),
 }
 
 impl From<u16> for MessageType {
@@ -32,9 +48,11 @@ impl From<u16> for MessageType {
             5 => MessageType::Hello,
             6 => MessageType::StreamTags,
             7 => MessageType::ClientInfo,
+            _ => panic!("Illegal message type"),
         }
     }
 }
+#[derive(Debug)]
 struct Base<'a> {
     mtype: MessageType,
     id: u16,
@@ -45,33 +63,87 @@ struct Base<'a> {
     payload: &'a [u8],
 }
 
-pub trait Message {
+pub trait SerializeMessage {
     fn as_buf(&self) -> Vec<u8>;
 }
 
 fn slice_to_u16(s: &[u8]) -> u16 {
     u16::from_le_bytes([s[0], s[1]])
 }
+fn slice_to_i32(s: &[u8]) -> i32 {
+    i32::from_le_bytes([s[0], s[1], s[2], s[3]])
+}
 fn slice_to_u32(s: &[u8]) -> u32 {
     u32::from_le_bytes([s[0], s[1], s[2], s[3]])
 }
+impl<'a> From<&'a [u8]> for CodecHeader<'a> {
+    fn from(buf: &'a [u8]) -> CodecHeader<'a> {
+        let size = slice_to_u32(&buf[0..4]) as usize;
+        let codec_name_end = 4 + size;
+        let codec = std::str::from_utf8(&buf[4..codec_name_end]).unwrap();
+        CodecHeader {
+            codec,
+            payload: &buf[codec_name_end..],
+        }
+    }
+}
+impl<'a> From<&'a [u8]> for ServerSettings {
+    fn from(buf: &'a [u8]) -> ServerSettings {
+        let _len = slice_to_u32(&buf[0..4]);
+        let s = std::str::from_utf8(&buf[4..]).expect("Bad UTF8 data");
+        serde_json::from_str(s).unwrap()
+    }
+}
 
-impl<'a> From<&[u8]> for Base<'a> {
-    fn from(buf: &[u8]) {
+impl<'a> From<&'a [u8]> for WireChunk<'a> {
+    fn from(buf: &'a [u8]) -> WireChunk<'a> {
+        WireChunk {
+            timestamp: TimeVal::from(&buf[0..8]),
+            payload: &buf[8..],
+        }
+    }
+}
+impl<'a> From<&'a [u8]> for Time {
+    fn from(buf: &'a [u8]) -> Time {
+        Time {
+            latency: TimeVal::from(&buf[0..8]),
+        }
+    }
+}
+impl<'a> From<&'a [u8]> for Base<'a> {
+    fn from(buf: &'a [u8]) -> Base<'a> {
         let mtype: MessageType = slice_to_u16(&buf[0..2]).into();
         let id = slice_to_u16(&buf[2..4]);
         let refers_to = slice_to_u16(&buf[4..6]);
-        let sent_s = slice_to_u32(&buf[6..10]);
-        let sent_u = slice_to_u32(&buf[10..14]);
-        let recv_s = slice_to_u32(&buf[14..18]);
-        let recv_u = slice_to_u32(&buf[22..26]);
-        let size = slice_to_u32(&buf[24..28]);
+        let sent_tv = TimeVal::from(&buf[6..14]);
+        let received_tv = TimeVal::from(&buf[14..22]);
+        let size = slice_to_u32(&buf[22..26]);
+        Base {
+            mtype,
+            id,
+            refers_to,
+            sent_tv,
+            received_tv,
+            size,
+            payload: &buf[Self::BASE_SIZE..],
+        }
     }
 }
 impl<'a> Base<'a> {
     const BASE_SIZE: usize = 26;
+    fn decode(&self) -> ServerMessage {
+        match self.mtype {
+            MessageType::CodecHeader => ServerMessage::CodecHeader(CodecHeader::from(self.payload)),
+            MessageType::ServerSettings => {
+                ServerMessage::ServerSettings(ServerSettings::from(self.payload))
+            }
+            MessageType::WireChunk => ServerMessage::WireChunk(WireChunk::from(self.payload)),
+            MessageType::Time => ServerMessage::Time(Time::from(self.payload)),
+            _ => todo!("didnt get to {:?}", self.mtype),
+        }
+    }
 }
-impl<'a> Message for Base<'a> {
+impl<'a> SerializeMessage for Base<'a> {
     fn as_buf(&self) -> Vec<u8> {
         let mut buf = Vec::with_capacity(self.payload.len() + Base::BASE_SIZE);
 
@@ -87,11 +159,11 @@ impl<'a> Message for Base<'a> {
         buf
     }
 }
-impl<'a> Message for ClientHello<'a> {
+impl<'a> SerializeMessage for ClientHello<'a> {
     fn as_buf(&self) -> Vec<u8> {
         let p_str = serde_json::to_string(&self).unwrap();
         let payload = p_str.as_bytes();
-        let payload_len_buf = u32::to_le_bytes(payload.len() as u32).to_vec();
+        let mut payload_len_buf = u32::to_le_bytes(payload.len() as u32).to_vec();
         payload_len_buf.extend_from_slice(payload);
         let payload = payload_len_buf;
         Base {
@@ -100,26 +172,33 @@ impl<'a> Message for ClientHello<'a> {
             refers_to: 0,
             sent_tv: TimeVal { sec: 0, usec: 0 },
             received_tv: TimeVal { sec: 0, usec: 0 },
-            size: payload.len() as u32 + 4,
+            size: payload.len() as u32,
             payload: &payload,
         }
         .as_buf()
     }
 }
 
+#[derive(Debug, Deserialize)]
 struct ServerSettings {
-    payload: String,
+    bufferMs: u32,
+    latency: u32,
+    muted: bool,
+    volume: u8,
 }
 
-struct CodecHeader {
-    codec: String,
-    payload: Vec<u8>,
+#[derive(Debug)]
+struct CodecHeader<'a> {
+    codec: &'a str,
+    payload: &'a [u8],
 }
 
+#[derive(Debug)]
 struct WireChunk<'a> {
     timestamp: TimeVal,
     payload: &'a [u8],
 }
+#[derive(Debug)]
 struct Time {
     latency: TimeVal,
 }
@@ -150,12 +229,14 @@ fn main() {
         OS: "an os",
     };
     let b = ch.as_buf();
-    println!("{:?}", b);
     let mut s = TcpStream::connect("127.0.0.1:1704").unwrap();
     s.write(&b).unwrap();
     loop {
         let mut buf = vec![0; 1500];
         let b = s.read(&mut buf).unwrap();
-        println!("read bytes {b}; got {buf:?}");
+        println!("read bytes {b}");
+        let b = Base::from(&buf[0..b]);
+        // println!("{b:?}");
+        println!("{:?}", b.decode());
     }
 }
