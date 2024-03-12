@@ -1,3 +1,5 @@
+use std::io::Read;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Copy, Clone, Debug)]
@@ -89,8 +91,8 @@ impl<'a> From<&'a [u8]> for CodecHeader<'a> {
 }
 impl<'a> From<&'a [u8]> for ServerSettings {
     fn from(buf: &'a [u8]) -> ServerSettings {
-        let _len = slice_to_u32(&buf[0..4]);
-        let s = std::str::from_utf8(&buf[4..]).expect("Bad UTF8 data");
+        let len = slice_to_u32(&buf[0..4]);
+        let s = std::str::from_utf8(&buf[4..4 + len as usize]).expect("Bad UTF8 data");
         serde_json::from_str(s).unwrap()
     }
 }
@@ -125,10 +127,11 @@ impl<'a> From<&'a [u8]> for Base<'a> {
             sent_tv,
             received_tv,
             size,
-            payload: &buf[Self::BASE_SIZE..],
+            payload: &buf[Self::BASE_SIZE..Self::BASE_SIZE + size as usize],
         }
     }
 }
+
 impl<'a> Base<'a> {
     const BASE_SIZE: usize = 26;
     pub fn decode(&self) -> ServerMessage {
@@ -141,6 +144,9 @@ impl<'a> Base<'a> {
             MessageType::Time => ServerMessage::Time(Time::from(self.payload)),
             _ => todo!("didnt get to {:?}", self.mtype),
         }
+    }
+    pub fn total_size(&self) -> usize {
+        Self::BASE_SIZE + self.size as usize
     }
 }
 impl<'a> SerializeMessage for Base<'a> {
@@ -188,10 +194,10 @@ struct ServerSettings {
     volume: u8,
 }
 #[derive(Debug)]
-struct OpusMetadata {
-    sample_rate: u32,
-    bit_depth: u16,
-    channel_count: u16,
+pub struct OpusMetadata {
+    pub sample_rate: u32,
+    pub bit_depth: u16,
+    pub channel_count: u16,
 }
 
 impl From<&[u8]> for OpusMetadata {
@@ -210,20 +216,20 @@ impl From<&[u8]> for OpusMetadata {
     }
 }
 #[derive(Debug)]
-enum CodecMetadata<'a> {
+pub enum CodecMetadata<'a> {
     Opaque(&'a [u8]),
     Opus(OpusMetadata),
 }
 #[derive(Debug)]
-struct CodecHeader<'a> {
-    codec: &'a str,
-    metadata: CodecMetadata<'a>,
+pub struct CodecHeader<'a> {
+    pub codec: &'a str,
+    pub metadata: CodecMetadata<'a>,
 }
 
 #[derive(Debug)]
-struct WireChunk<'a> {
-    timestamp: TimeVal,
-    payload: &'a [u8],
+pub struct WireChunk<'a> {
+    pub timestamp: TimeVal,
+    pub payload: &'a [u8],
 }
 #[derive(Debug)]
 struct Time {
