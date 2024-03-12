@@ -104,9 +104,10 @@ impl<'a> From<&'a [u8]> for ServerSettings {
 
 impl<'a> From<&'a [u8]> for WireChunk<'a> {
     fn from(buf: &'a [u8]) -> WireChunk<'a> {
+        let size = slice_to_u32(&buf[8..12]);
         WireChunk {
             timestamp: TimeVal::from(&buf[0..8]),
-            payload: &buf[8..],
+            payload: &buf[12..12 + size as usize],
         }
     }
 }
