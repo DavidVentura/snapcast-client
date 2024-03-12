@@ -81,10 +81,12 @@ impl<'a> From<&'a [u8]> for CodecHeader<'a> {
         let size = slice_to_u32(&buf[0..4]) as usize;
         let codec_name_end = 4 + size;
         let codec = std::str::from_utf8(&buf[4..codec_name_end]).unwrap();
-        CodecHeader {
-            codec,
-            payload: &buf[codec_name_end..],
-        }
+        let payload = &buf[codec_name_end..];
+        let metadata = match codec {
+            "opus" => CodecMetadata::Opus(OpusMetadata::from(payload)),
+            _ => todo!("unsupported codec {}", codec),
+        };
+        CodecHeader { codec, metadata }
     }
 }
 impl<'a> From<&'a [u8]> for ServerSettings {
@@ -180,17 +182,44 @@ impl<'a> SerializeMessage for ClientHello<'a> {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(non_snake_case)]
 struct ServerSettings {
     bufferMs: u32,
     latency: u32,
     muted: bool,
     volume: u8,
 }
+#[derive(Debug)]
+struct OpusMetadata {
+    sample_rate: u32,
+    bit_depth: u16,
+    channel_count: u16,
+}
 
+impl From<&[u8]> for OpusMetadata {
+    fn from(buf: &[u8]) -> OpusMetadata {
+        let payload_len = slice_to_u32(&buf[0..4]);
+        assert_eq!(payload_len, 12);
+        let marker = slice_to_u32(&buf[4..8]);
+        let sample_rate = slice_to_u32(&buf[8..12]);
+        let bit_depth = slice_to_u16(&buf[12..14]);
+        let channel_count = slice_to_u16(&buf[14..16]);
+        OpusMetadata {
+            sample_rate,
+            bit_depth,
+            channel_count,
+        }
+    }
+}
+#[derive(Debug)]
+enum CodecMetadata<'a> {
+    Opaque(&'a [u8]),
+    Opus(OpusMetadata),
+}
 #[derive(Debug)]
 struct CodecHeader<'a> {
     codec: &'a str,
-    payload: &'a [u8],
+    metadata: CodecMetadata<'a>,
 }
 
 #[derive(Debug)]
