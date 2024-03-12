@@ -87,6 +87,8 @@ impl<'a> From<&'a [u8]> for CodecHeader<'a> {
         let metadata = match codec {
             "opus" => CodecMetadata::Opus(OpusMetadata::from(payload)),
             "flac" => CodecMetadata::Opaque(payload),
+            "pcm" => CodecMetadata::Opaque(payload),
+            "ogg" => CodecMetadata::Opaque(payload),
             _ => todo!("unsupported codec {}", codec),
         };
         CodecHeader { codec, metadata }
