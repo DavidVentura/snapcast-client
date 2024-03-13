@@ -1,9 +1,10 @@
 mod proto;
 
-//use flac::StreamReader;
-use opus::{Channels, Decoder};
+use decoder::{Decode, Decoder};
 
-use proto::{Base, CodecMetadata, Server, ServerMessage};
+use std::collections::VecDeque;
+
+use proto::{Base, Server, ServerMessage};
 
 use std::io::prelude::*;
 use std::net::TcpStream;
@@ -17,17 +18,7 @@ use alsa::{Direction, ValueOr};
 
 //use byte_slice_cast::*;
 
-struct GenericDecoder {
-    //buf: &'a [u8],
-    buf: Vec<u8>,
-}
-
-impl Read for GenericDecoder {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        buf.copy_from_slice(&self.buf);
-        Ok(self.buf.len())
-    }
-}
+mod decoder;
 
 fn main() {
     let srv = Server::new("11:22:33:44:55:66".into(), "framework".into());
@@ -36,7 +27,6 @@ fn main() {
     s.write(&b).unwrap();
 
     let mut dec: Option<Decoder> = None;
-    let mut flacdec: Option<GenericDecoder> = None;
 
     let mut samples_out = vec![0; 960 * 2];
     /*
@@ -58,7 +48,7 @@ fn main() {
     .unwrap();
     */
 
-    let mut pkt_buf = vec![0; 4500];
+    let mut pkt_buf = vec![0; 14500];
 
     // Open default playback device
     let pcm = PCM::new("default", Direction::Playback, false).unwrap();
@@ -82,6 +72,8 @@ fn main() {
     //let mut gd = GenericDecoder::new();
     //let sr = StreamReader::<GenericDecoder>::new(gd);
     // let mut f = std::fs::File::create("out.wav").unwrap();
+    let mut buf_samples = VecDeque::new();
+    let mut enough_to_start = false;
     loop {
         // assumes multiple packets per read, but never half a packet, will panic
         let mut remaining_bytes = s.read(&mut pkt_buf).unwrap();
@@ -94,45 +86,33 @@ fn main() {
 
             let decoded_m = b.decode();
             match decoded_m {
-                ServerMessage::CodecHeader(ch) => match ch.metadata {
-                    CodecMetadata::Opaque(header) => {
-                        //
-                        //f.write(header).unwrap();
-                        //
-                        //_ = flacdec.insert(d);
-                        //gd.feed(header);
-                    }
-                    CodecMetadata::Opus(config) => {
-                        //println!("{config:?}");
-                        let c = match config.channel_count {
-                            1 => Channels::Mono,
-                            2 => Channels::Stereo,
-                            _ => panic!("unsupported channel configuration"),
-                        };
-                        let d = Decoder::new(config.sample_rate, c).unwrap();
-                        let d = Decoder::new(48000, Channels::Stereo).unwrap();
-                        _ = dec.insert(d);
-                    }
-                },
+                ServerMessage::CodecHeader(ch) => _ = dec.insert(Decoder::new(ch)),
                 ServerMessage::WireChunk(wc) => {
-                    //let (_, converted, _) = unsafe { wc.payload.align_to::<i16>() };
-                    // io.writei(converted).unwrap();
-                    //if pcm.state() != State::Running {
-                    //    pcm.start().unwrap()
-                    //};
+                    /*
+                    let (_, converted, _) = unsafe { wc.payload.align_to::<i16>() };
+                    io.writei(converted).unwrap();
+                    if pcm.state() != State::Running {
+                        pcm.start().unwrap()
+                    };
+                    */
                     //pulseaudio.write(wc.payload).unwrap();
                     //println!("{}", wc.payload.len());
                     //f.write(wc.payload).unwrap();
 
                     match &mut dec {
                         Some(dec) => {
-                            let decoded_samples =
-                                dec.decode(wc.payload, &mut samples_out, false).unwrap();
-                            // TODO: fec?
+                            dec.decode_sample(wc.payload, &mut samples_out).unwrap();
 
-                            io.writei(&samples_out).unwrap();
-                            if pcm.state() != State::Running {
-                                pcm.start().unwrap();
+                            buf_samples.push_back(samples_out.clone());
+                            if buf_samples.len() > 10 {
+                                enough_to_start = true;
+                            }
+                            if enough_to_start {
+                                let buffered_sample = buf_samples.pop_front().unwrap();
+                                io.writei(&buffered_sample).unwrap();
+                                if pcm.state() != State::Running {
+                                    pcm.start().unwrap();
+                                }
                             }
                             //let as_u8 = samples_out.as_byte_slice().as_slice_of::<u8>().unwrap();
                             // TODO: *2 is not great
