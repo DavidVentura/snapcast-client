@@ -89,7 +89,7 @@ impl<'a> From<&'a [u8]> for CodecHeader<'a> {
         let metadata = match codec {
             "opus" => CodecMetadata::Opus(OpusMetadata::from(payload)),
             "flac" => CodecMetadata::Opaque(payload),
-            "pcm" => CodecMetadata::Opaque(payload),
+            "pcm" => CodecMetadata::Pcm(PcmMetadata::from(payload)),
             "ogg" => CodecMetadata::Opaque(payload),
             _ => todo!("unsupported codec {}", codec),
         };
@@ -239,9 +239,36 @@ impl From<&[u8]> for OpusMetadata {
         }
     }
 }
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug)]
+pub(crate) struct PcmMetadata<'a> {
+    raw_payload: &'a [u8],
+    pub(crate) channel_count: u16,
+    pub(crate) audio_rate: u32,
+    pub(crate) bit_depth: u16,
+}
+
+impl<'a> From<&'a [u8]> for PcmMetadata<'a> {
+    fn from(buf: &'a [u8]) -> PcmMetadata<'a> {
+        assert_eq!(buf[0..4], [b'R', b'I', b'F', b'F']);
+        // +16 = remaining header len
+        let format_tag = slice_to_u16(&buf[20..22]);
+        assert_eq!(format_tag, 1); // PCM
+        let channel_count = slice_to_u16(&buf[22..24]);
+        let audio_rate = slice_to_u32(&buf[24..28]);
+        let bit_depth = slice_to_u16(&buf[34..36]);
+        PcmMetadata {
+            raw_payload: buf,
+            channel_count,
+            bit_depth,
+            audio_rate,
+        }
+    }
+}
+
+#[derive(Debug)]
 pub enum CodecMetadata<'a> {
     Opaque(&'a [u8]),
+    Pcm(PcmMetadata<'a>),
     Opus(OpusMetadata),
 }
 
@@ -249,6 +276,7 @@ impl<'a> CodecMetadata<'a> {
     pub fn rate(&self) -> usize {
         match self {
             CodecMetadata::Opus(o) => o.sample_rate as usize,
+            CodecMetadata::Pcm(p) => p.audio_rate as usize,
             _ => todo!(),
         }
     }
