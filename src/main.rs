@@ -5,7 +5,9 @@ mod proto;
 use decoder::{Decode, Decoder};
 #[cfg(feature = "alsa")]
 use playback::Alsa;
-use playback::{File, Player, Players};
+#[cfg(feature = "pulse")]
+use playback::Pulse;
+use playback::{File, Player, Players, Tcp};
 
 use std::collections::VecDeque;
 
@@ -76,11 +78,19 @@ fn main() -> anyhow::Result<()> {
                     let p: Players = Players::from(Alsa::new(ch.metadata.rate())?);
                     _ = player.insert(p);
                 }
+                #[cfg(feature = "pulse")]
+                {
+                    let p: Players = Players::from(Pulse::new(ch.metadata.rate())?);
+                    _ = player.insert(p);
+                }
                 #[cfg(not(any(feature = "alsa", feature = "pulse")))]
                 {
-                    println!("Compiled without support for pulse/alsa, outputting to out.pcm");
-                    let p: Players = Players::from(File::new(std::path::Path::new("out.pcm"))?);
+                    println!("Compiled without support for pulse/alsa, outputting to TCP");
+                    let p: Players = Players::from(Tcp::new("127.0.0.1:12345")?);
                     _ = player.insert(p);
+                    //println!("Compiled without support for pulse/alsa, outputting to out.pcm");
+                    //let p: Players = Players::from(File::new(std::path::Path::new("out.pcm"))?);
+                    //_ = player.insert(p);
                 }
                 sample_goal = buffer_len / 1000 * ch.metadata.rate();
                 println!(
