@@ -54,7 +54,7 @@ pub(crate) struct NoOpDecoder;
 impl Decode for NoOpDecoder {
     fn decode_sample(&mut self, buf: &[u8], out: &mut [i16]) -> Result<usize, anyhow::Error> {
         let (_, converted, _) = unsafe { buf.align_to::<i16>() };
-        out.copy_from_slice(converted);
+        (&mut out[0..converted.len()]).copy_from_slice(&converted);
 
         Ok(converted.len())
     }
