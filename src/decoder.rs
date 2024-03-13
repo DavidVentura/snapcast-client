@@ -27,7 +27,7 @@ impl Decoder {
 }
 
 pub(crate) trait Decode {
-    /// Returns number of samples
+    /// Returns total number of samples
     fn decode_sample(&mut self, buf: &[u8], out: &mut [i16]) -> Result<usize, anyhow::Error>;
 }
 
@@ -43,7 +43,7 @@ impl Decode for Decoder {
 impl Decode for opus::Decoder {
     fn decode_sample(&mut self, buf: &[u8], out: &mut [i16]) -> Result<usize, anyhow::Error> {
         // TODO: fec?
-        Ok(self.decode(buf, out, false)?)
+        Ok(self.decode(buf, out, false)? * 2)
     }
 }
 
@@ -53,6 +53,7 @@ impl Decode for NoOpDecoder {
     fn decode_sample(&mut self, buf: &[u8], out: &mut [i16]) -> Result<usize, anyhow::Error> {
         let (_, converted, _) = unsafe { buf.align_to::<i16>() };
         out.copy_from_slice(converted);
+
         Ok(converted.len())
     }
 }
