@@ -1,7 +1,9 @@
 use crate::proto::{CodecHeader, CodecMetadata};
 use anyhow::Result;
+use enum_dispatch::enum_dispatch;
 use opus;
 
+#[enum_dispatch(Decode)]
 pub(crate) enum Decoder {
     Opus(opus::Decoder),
     PCM(NoOpDecoder),
@@ -26,18 +28,10 @@ impl Decoder {
     }
 }
 
+#[enum_dispatch]
 pub(crate) trait Decode {
     /// Returns total number of samples
     fn decode_sample(&mut self, buf: &[u8], out: &mut [i16]) -> Result<usize, anyhow::Error>;
-}
-
-impl Decode for Decoder {
-    fn decode_sample(&mut self, buf: &[u8], out: &mut [i16]) -> Result<usize, anyhow::Error> {
-        match self {
-            Decoder::Opus(o) => o.decode_sample(buf, out),
-            Decoder::PCM(p) => p.decode_sample(buf, out),
-        }
-    }
 }
 
 impl Decode for opus::Decoder {

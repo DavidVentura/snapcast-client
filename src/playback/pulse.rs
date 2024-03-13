@@ -1,3 +1,4 @@
+use super::Player;
 use libpulse_binding::sample::{Format, Spec};
 use libpulse_binding::stream::Direction;
 use libpulse_simple_binding::Simple;
@@ -27,9 +28,10 @@ impl PulsePlayer {
 
         PulsePlayer { pulse }
     }
-
-    pub fn play(&self) {}
-    pub fn write(&self, buf: &[i16]) {
+}
+impl Player for PulsePlayer {
+    fn play(&self) {}
+    fn write(&self, buf: &[i16]) {
         let (_, converted, _) = unsafe { buf.align_to::<u8>() };
         self.pulse.write(converted).unwrap();
     }

@@ -1,6 +1,8 @@
 use alsa::pcm::{Access, Format, HwParams, State, PCM};
 use alsa::{Direction, ValueOr};
 
+use super::Player;
+
 pub struct AlsaPlayer {
     pcm: PCM,
 }
@@ -31,12 +33,14 @@ impl AlsaPlayer {
 
         AlsaPlayer { pcm }
     }
-    pub fn play(&self) {
+}
+impl Player for AlsaPlayer {
+    fn play(&self) {
         if self.pcm.state() != State::Running {
             self.pcm.start().unwrap();
         }
     }
-    pub fn write(&self, buf: &[i16]) {
+    fn write(&self, buf: &[i16]) {
         let io = self.pcm.io_i16().unwrap();
         io.writei(buf).unwrap();
     }

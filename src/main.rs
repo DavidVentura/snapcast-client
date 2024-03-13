@@ -3,6 +3,7 @@ mod playback;
 mod proto;
 
 use decoder::{Decode, Decoder};
+use playback::{AlsaPlayer, Player, Players};
 
 use std::collections::VecDeque;
 
@@ -27,8 +28,7 @@ fn main() {
     let mut buf_samples = VecDeque::new();
     let mut enough_to_start = false;
 
-    let player = playback::alsa::AlsaPlayer::new();
-    //let player = playback::pulse::PulsePlayer::new();
+    let player: Players = Players::from(AlsaPlayer::new());
     loop {
         // assumes multiple packets per read, but never half a packet, will panic
         let mut remaining_bytes = s.read(&mut pkt_buf).unwrap();
