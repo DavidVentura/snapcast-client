@@ -8,11 +8,11 @@ pub struct Pulse {
 }
 
 impl Pulse {
-    pub fn new() -> anyhow::Result<Pulse> {
+    pub fn new(rate: usize) -> anyhow::Result<Pulse> {
         let spec = Spec {
             format: Format::S16NE,
             channels: 2,
-            rate: 48000,
+            rate,
         };
         let pulse = Simple::new(
             None,                // Use the default server

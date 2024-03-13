@@ -219,7 +219,7 @@ pub(crate) struct ServerSettings {
     pub(crate) muted: bool,
     pub(crate) volume: u8,
 }
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub struct OpusMetadata {
     pub sample_rate: u32,
     pub bit_depth: u16,
@@ -239,10 +239,19 @@ impl From<&[u8]> for OpusMetadata {
         }
     }
 }
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub enum CodecMetadata<'a> {
     Opaque(&'a [u8]),
     Opus(OpusMetadata),
+}
+
+impl<'a> CodecMetadata<'a> {
+    pub fn rate(&self) -> usize {
+        match self {
+            CodecMetadata::Opus(o) => o.sample_rate as usize,
+            _ => todo!(),
+        }
+    }
 }
 #[derive(Debug)]
 pub struct CodecHeader<'a> {

@@ -13,8 +13,8 @@ pub(crate) enum Decoder {
 }
 
 impl Decoder {
-    pub fn new(ch: CodecHeader) -> anyhow::Result<Decoder> {
-        match ch.metadata {
+    pub fn new(ch: &CodecHeader) -> anyhow::Result<Decoder> {
+        match &ch.metadata {
             CodecMetadata::Opaque(header) => {
                 // TODO: discriminate opaque types
                 Ok(Decoder::PCM(NoOpDecoder {}))

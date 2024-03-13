@@ -38,7 +38,7 @@ fn main() -> anyhow::Result<()> {
                 sec: now.as_secs() as i32, // allows for 68 years of uptime
                 usec: now.subsec_micros() as i32,
             };
-            println!("my delta {:?}", now);
+            //println!("my delta {:?}", now);
             let t = Time::as_buf(i, tv, tv, tv);
             send_side.write(&t).unwrap();
             i = i.wrapping_add(1);
@@ -50,6 +50,7 @@ fn main() -> anyhow::Result<()> {
     // >= (960 * 2) for OPUS
     // == 2880 for PCM
     let mut samples_out = vec![0; 2880];
+    let mut samples_out = vec![0; 2646];
 
     let mut hdr_buf = vec![0; 26];
     // localhost MTU is pretty large )
@@ -57,10 +58,7 @@ fn main() -> anyhow::Result<()> {
     let mut buf_samples = VecDeque::new();
     let mut enough_to_start = false;
 
-    #[cfg(feature = "alsa")]
-    let mut player: Players = Players::from(Alsa::new()?);
-    #[cfg(not(any(feature = "alsa", feature = "pulse")))]
-    let mut player: Players = Players::from(File::new(std::path::Path::new("out.pcm"))?);
+    let mut player: Option<Players> = None;
 
     loop {
         s.read_exact(&mut hdr_buf)?;
@@ -69,21 +67,34 @@ fn main() -> anyhow::Result<()> {
 
         let decoded_m = b.decode(&pkt_buf[0..b.size as usize]);
         match decoded_m {
-            ServerMessage::CodecHeader(ch) => _ = dec.insert(Decoder::new(ch)?),
+            ServerMessage::CodecHeader(ch) => {
+                _ = dec.insert(Decoder::new(&ch)?);
+                println!("{:?}", ch);
+
+                #[cfg(feature = "alsa")]
+                let p: Players = Players::from(Alsa::new(ch.metadata.rate())?);
+                #[cfg(not(any(feature = "alsa", feature = "pulse")))]
+                let p: Players = Players::from(File::new(std::path::Path::new("out.pcm"))?);
+
+                _ = player.insert(p);
+            }
             ServerMessage::WireChunk(wc) => {
-                println!("wc ts {:?}", wc.timestamp);
+                //println!("wc ts {:?}", wc.timestamp);
                 // Guard against chunks coming before the decoder is initialized
                 if let Some(ref mut dec) = dec {
                     let s = dec.decode_sample(wc.payload, &mut samples_out)?;
 
                     buf_samples.push_back(samples_out[0..s].to_vec());
+                    //buf_samples.push_back(samples_out.to_vec());
                     if buf_samples.len() > 2 {
                         enough_to_start = true;
                     }
                     if enough_to_start {
                         if let Some(buffered_sample) = buf_samples.pop_front() {
-                            player.play()?;
-                            player.write(&buffered_sample)?;
+                            if let Some(ref mut p) = player {
+                                p.play()?;
+                                p.write(&buffered_sample)?;
+                            }
                         }
                     }
                 }

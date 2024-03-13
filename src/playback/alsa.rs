@@ -8,7 +8,7 @@ pub struct Alsa {
 }
 
 impl Alsa {
-    pub fn new() -> anyhow::Result<Alsa> {
+    pub fn new(rate: usize) -> anyhow::Result<Alsa> {
         // Open default playback device
         let pcm = PCM::new("default", Direction::Playback, false)?;
 
@@ -16,7 +16,7 @@ impl Alsa {
         {
             let hwp = HwParams::any(&pcm)?;
             hwp.set_channels(2)?;
-            hwp.set_rate(48000, ValueOr::Nearest)?;
+            hwp.set_rate(rate as u32, ValueOr::Nearest)?;
             hwp.set_format(Format::s16())?;
             hwp.set_access(Access::RWInterleaved)?;
             pcm.hw_params(&hwp)?;
