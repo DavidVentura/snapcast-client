@@ -126,6 +126,9 @@ impl<'a> From<&'a [u8]> for Base<'a> {
         let sent_tv = TimeVal::from(&buf[6..14]);
         let received_tv = TimeVal::from(&buf[14..22]);
         let size = slice_to_u32(&buf[22..26]);
+        let payload = &buf[Self::BASE_SIZE..Self::BASE_SIZE + size as usize];
+        // short read
+        assert_eq!(payload.len(), size as usize);
         Base {
             mtype,
             id,
@@ -133,7 +136,7 @@ impl<'a> From<&'a [u8]> for Base<'a> {
             sent_tv,
             received_tv,
             size,
-            payload: &buf[Self::BASE_SIZE..Self::BASE_SIZE + size as usize],
+            payload,
         }
     }
 }
