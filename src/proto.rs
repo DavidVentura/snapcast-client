@@ -228,7 +228,7 @@ pub struct OpusMetadata {
 
 impl From<&[u8]> for OpusMetadata {
     fn from(buf: &[u8]) -> OpusMetadata {
-        let marker = slice_to_u32(&buf[0..4]);
+        let _marker = slice_to_u32(&buf[0..4]);
         let sample_rate = slice_to_u32(&buf[4..8]);
         let bit_depth = slice_to_u16(&buf[8..10]);
         let channel_count = slice_to_u16(&buf[10..12]);

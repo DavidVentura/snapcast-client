@@ -15,10 +15,7 @@ pub(crate) enum Decoder {
 impl Decoder {
     pub fn new(ch: &CodecHeader) -> anyhow::Result<Decoder> {
         match &ch.metadata {
-            CodecMetadata::Pcm(header) => {
-                // TODO: discriminate opaque types
-                Ok(Decoder::PCM(NoOpDecoder {}))
-            }
+            CodecMetadata::Pcm(_) => Ok(Decoder::PCM(NoOpDecoder {})),
             CodecMetadata::Opus(config) => {
                 #[cfg(feature = "opus")]
                 {
@@ -56,7 +53,7 @@ impl Decode for NoOpDecoder {
     fn decode_sample(&mut self, buf: &[u8], out: &mut [i16]) -> Result<usize, anyhow::Error> {
         // SAFETY: This is safe by design - a no-op decoder passes the data through as-is
         let (_, converted, _) = unsafe { buf.align_to::<i16>() };
-        (&mut out[0..converted.len()]).copy_from_slice(&converted);
+        out[0..converted.len()].copy_from_slice(converted);
 
         Ok(converted.len())
     }

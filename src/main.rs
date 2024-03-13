@@ -40,7 +40,7 @@ fn main() -> anyhow::Result<()> {
             };
             //println!("my delta {:?}", now);
             let t = Time::as_buf(i, tv, tv, tv);
-            send_side.write(&t).unwrap();
+            send_side.write_all(&t).unwrap();
             i = i.wrapping_add(1);
         }
     });
