@@ -7,8 +7,8 @@ use enum_dispatch::enum_dispatch;
 
 #[enum_dispatch]
 pub(crate) trait Player {
-    fn play(&self);
-    fn write(&self, buf: &[i16]);
+    fn play(&self) -> anyhow::Result<()>;
+    fn write(&self, buf: &[i16]) -> anyhow::Result<()>;
 }
 
 #[enum_dispatch(Player)]

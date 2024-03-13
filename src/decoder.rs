@@ -10,11 +10,11 @@ pub(crate) enum Decoder {
 }
 
 impl Decoder {
-    pub fn new(ch: CodecHeader) -> Decoder {
+    pub fn new(ch: CodecHeader) -> anyhow::Result<Decoder> {
         match ch.metadata {
             CodecMetadata::Opaque(header) => {
                 // TODO: discriminate opaque types
-                Decoder::PCM(NoOpDecoder {})
+                Ok(Decoder::PCM(NoOpDecoder {}))
             }
             CodecMetadata::Opus(config) => {
                 let c = match config.channel_count {
@@ -22,7 +22,7 @@ impl Decoder {
                     2 => opus::Channels::Stereo,
                     _ => panic!("unsupported channel configuration"),
                 };
-                Decoder::Opus(opus::Decoder::new(config.sample_rate, c).unwrap())
+                Ok(Decoder::Opus(opus::Decoder::new(config.sample_rate, c)?))
             }
         }
     }

@@ -8,7 +8,7 @@ pub struct PulsePlayer {
 }
 
 impl PulsePlayer {
-    pub fn new() -> PulsePlayer {
+    pub fn new() -> anyhow::Result<PulsePlayer> {
         let spec = Spec {
             format: Format::S16NE,
             channels: 2,
@@ -23,16 +23,17 @@ impl PulsePlayer {
             &spec,               // Our sample format
             None,                // Use default channel map
             None,                // Use default buffering attributes
-        )
-        .unwrap();
+        )?;
 
-        PulsePlayer { pulse }
+        Ok(PulsePlayer { pulse })
     }
 }
 impl Player for PulsePlayer {
-    fn play(&self) {}
-    fn write(&self, buf: &[i16]) {
+    fn play(&self) -> anyhow::Result<()> {
+        Ok(())
+    }
+    fn write(&self, buf: &[i16]) -> anyhow::Result<()> {
         let (_, converted, _) = unsafe { buf.align_to::<u8>() };
-        self.pulse.write(converted).unwrap();
+        Ok(self.pulse.write(converted)?)
     }
 }
