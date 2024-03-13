@@ -1,5 +1,7 @@
-Attempt at an implementation of the client-side of the [Snapcast](https://github.com/badaix/snapcast) [protocol](https://github.com/badaix/snapcast/blob/develop/doc/binary_protocol.md)
+Implementation of the client-side of the [Snapcast](https://github.com/badaix/snapcast) [protocol](https://github.com/badaix/snapcast/blob/develop/doc/binary_protocol.md) (snapclient).
 
-At a basic level, the protocol works, audio packets are not in any way synchronized before playback.
+At a basic level, the player works, though audio packets are not in any way synchronized before playback.
 
-Only PCM audio plays back correctly via pulseaudio, but there are small gaps in playback
+Only PCM/Opus are implemented, and only File/Pulse/Alsa work for output devices.
+
+On my machine, there are small gaps every 11 seconds but I think it's alsa/pulse config.
