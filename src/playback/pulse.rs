@@ -33,6 +33,7 @@ impl Player for PulsePlayer {
         Ok(())
     }
     fn write(&self, buf: &[i16]) -> anyhow::Result<()> {
+        // SAFETY: it's always safe to align i16 to u8
         let (_, converted, _) = unsafe { buf.align_to::<u8>() };
         Ok(self.pulse.write(converted)?)
     }

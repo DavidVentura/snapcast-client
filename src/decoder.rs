@@ -1,10 +1,13 @@
 use crate::proto::{CodecHeader, CodecMetadata};
 use anyhow::Result;
 use enum_dispatch::enum_dispatch;
+
+#[cfg(feature = "opus")]
 use opus;
 
 #[enum_dispatch(Decode)]
 pub(crate) enum Decoder {
+    #[cfg(feature = "opus")]
     Opus(opus::Decoder),
     PCM(NoOpDecoder),
 }
@@ -17,12 +20,16 @@ impl Decoder {
                 Ok(Decoder::PCM(NoOpDecoder {}))
             }
             CodecMetadata::Opus(config) => {
-                let c = match config.channel_count {
-                    1 => opus::Channels::Mono,
-                    2 => opus::Channels::Stereo,
-                    _ => panic!("unsupported channel configuration"),
-                };
-                Ok(Decoder::Opus(opus::Decoder::new(config.sample_rate, c)?))
+                #[cfg(feature = "opus")]
+                {
+                    let c = match config.channel_count {
+                        1 => opus::Channels::Mono,
+                        2 => opus::Channels::Stereo,
+                        _ => panic!("unsupported channel configuration"),
+                    };
+                    return Ok(Decoder::Opus(opus::Decoder::new(config.sample_rate, c)?));
+                }
+                anyhow::bail!("Codec not supported");
             }
         }
     }
@@ -34,6 +41,7 @@ pub(crate) trait Decode {
     fn decode_sample(&mut self, buf: &[u8], out: &mut [i16]) -> Result<usize, anyhow::Error>;
 }
 
+#[cfg(feature = "opus")]
 impl Decode for opus::Decoder {
     fn decode_sample(&mut self, buf: &[u8], out: &mut [i16]) -> Result<usize, anyhow::Error> {
         // TODO: fec?

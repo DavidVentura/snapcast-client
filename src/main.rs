@@ -3,7 +3,7 @@ mod playback;
 mod proto;
 
 use decoder::{Decode, Decoder};
-use playback::{AlsaPlayer, Player, Players};
+use playback::{FilePlayer, Player, Players};
 
 use std::collections::VecDeque;
 
@@ -28,7 +28,9 @@ fn main() -> anyhow::Result<()> {
     let mut buf_samples = VecDeque::new();
     let mut enough_to_start = false;
 
-    let player: Players = Players::from(AlsaPlayer::new()?);
+    //let player: Players = Players::from(AlsaPlayer::new()?);
+    let mut player: Players = Players::from(FilePlayer::new(std::path::Path::new("out.pcm"))?);
+
     loop {
         // assumes multiple packets per read, but never half a packet, will panic
         let mut remaining_bytes = s.read(&mut pkt_buf)?;
