@@ -51,18 +51,13 @@ impl From<u16> for MessageType {
     }
 }
 #[derive(Debug)]
-pub struct Base<'a> {
+pub struct Base {
     mtype: MessageType,
     id: u16,
     refers_to: u16,
     sent_tv: TimeVal,
     received_tv: TimeVal,
-    size: u32,
-    payload: &'a [u8],
-}
-
-pub trait SerializeMessage {
-    fn as_buf(&self) -> Vec<u8>;
+    pub(crate) size: u32,
 }
 
 fn slice_to_u16(s: &[u8]) -> u16 {
@@ -116,17 +111,15 @@ impl<'a> From<&'a [u8]> for Time {
         }
     }
 }
-impl<'a> From<&'a [u8]> for Base<'a> {
-    fn from(buf: &'a [u8]) -> Base<'a> {
+
+impl<'a> From<&'a [u8]> for Base {
+    fn from(buf: &'a [u8]) -> Base {
         let mtype: MessageType = slice_to_u16(&buf[0..2]).into();
         let id = slice_to_u16(&buf[2..4]);
         let refers_to = slice_to_u16(&buf[4..6]);
         let sent_tv = TimeVal::from(&buf[6..14]);
         let received_tv = TimeVal::from(&buf[14..22]);
         let size = slice_to_u32(&buf[22..26]);
-        let payload = &buf[Self::BASE_SIZE..Self::BASE_SIZE + size as usize];
-        // short read
-        assert_eq!(payload.len(), size as usize);
         Base {
             mtype,
             id,
@@ -134,31 +127,27 @@ impl<'a> From<&'a [u8]> for Base<'a> {
             sent_tv,
             received_tv,
             size,
-            payload,
         }
     }
 }
 
-impl<'a> Base<'a> {
+impl Base {
     const BASE_SIZE: usize = 26;
-    pub fn decode(&self) -> ServerMessage {
+
+    pub fn decode<'a>(&self, payload: &'a [u8]) -> ServerMessage<'a> {
         match self.mtype {
-            MessageType::CodecHeader => ServerMessage::CodecHeader(CodecHeader::from(self.payload)),
+            MessageType::CodecHeader => ServerMessage::CodecHeader(CodecHeader::from(payload)),
             MessageType::ServerSettings => {
-                ServerMessage::ServerSettings(ServerSettings::from(self.payload))
+                ServerMessage::ServerSettings(ServerSettings::from(payload))
             }
-            MessageType::WireChunk => ServerMessage::WireChunk(WireChunk::from(self.payload)),
-            MessageType::Time => ServerMessage::Time(Time::from(self.payload)),
+            MessageType::WireChunk => ServerMessage::WireChunk(WireChunk::from(payload)),
+            MessageType::Time => ServerMessage::Time(Time::from(payload)),
             _ => todo!("didnt get to {:?}", self.mtype),
         }
     }
-    pub fn total_size(&self) -> usize {
-        Self::BASE_SIZE + self.size as usize
-    }
-}
-impl<'a> SerializeMessage for Base<'a> {
-    fn as_buf(&self) -> Vec<u8> {
-        let mut buf = Vec::with_capacity(self.payload.len() + Base::BASE_SIZE);
+
+    fn as_buf(&self, payload: &[u8]) -> Vec<u8> {
+        let mut buf = Vec::with_capacity(payload.len() + Base::BASE_SIZE);
 
         buf.extend(u16::to_le_bytes(self.mtype as u16));
         buf.extend(u16::to_le_bytes(self.id));
@@ -168,11 +157,12 @@ impl<'a> SerializeMessage for Base<'a> {
         buf.extend(i32::to_le_bytes(self.received_tv.sec));
         buf.extend(i32::to_le_bytes(self.received_tv.usec));
         buf.extend(u32::to_le_bytes(self.size));
-        buf.extend(self.payload);
+        buf.extend(payload);
         buf
     }
 }
-impl<'a> SerializeMessage for ClientHello<'a> {
+
+impl<'a> ClientHello<'a> {
     fn as_buf(&self) -> Vec<u8> {
         let p_str = serde_json::to_string(&self).unwrap();
         let payload = p_str.as_bytes();
@@ -186,19 +176,18 @@ impl<'a> SerializeMessage for ClientHello<'a> {
             sent_tv: TimeVal { sec: 0, usec: 0 },
             received_tv: TimeVal { sec: 0, usec: 0 },
             size: payload.len() as u32,
-            payload: &payload,
         }
-        .as_buf()
+        .as_buf(&payload)
     }
 }
 
 #[derive(Debug, Deserialize)]
 #[allow(non_snake_case)]
-struct ServerSettings {
-    bufferMs: u32,
-    latency: u32,
-    muted: bool,
-    volume: u8,
+pub(crate) struct ServerSettings {
+    pub(crate) bufferMs: u32,
+    pub(crate) latency: u32,
+    pub(crate) muted: bool,
+    pub(crate) volume: u8,
 }
 #[derive(Debug)]
 pub struct OpusMetadata {
@@ -237,7 +226,7 @@ pub struct WireChunk<'a> {
     pub payload: &'a [u8],
 }
 #[derive(Debug)]
-struct Time {
+pub struct Time {
     latency: TimeVal,
 }
 #[allow(non_snake_case)]

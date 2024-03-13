@@ -3,7 +3,9 @@ mod playback;
 mod proto;
 
 use decoder::{Decode, Decoder};
-use playback::{FilePlayer, Player, Players};
+#[cfg(feature = "alsa")]
+use playback::Alsa;
+use playback::{File, Player, Players};
 
 use std::collections::VecDeque;
 
@@ -16,52 +18,50 @@ fn main() -> anyhow::Result<()> {
     let srv = Server::new("11:22:33:44:55:66".into(), "framework".into());
     let b = srv.hello();
     let mut s = TcpStream::connect("192.168.2.131:1704")?;
-    s.write(&b)?;
+    s.write_all(&b)?;
 
     let mut dec: Option<Decoder> = None;
+
     // >= (960 * 2) for OPUS
     // == 2880 for PCM
     let mut samples_out = vec![0; 2880];
 
+    let mut hdr_buf = vec![0; 26];
     // localhost MTU is pretty large )
-    let mut pkt_buf = vec![0; 14500];
+    let mut pkt_buf = vec![0; 6000];
     let mut buf_samples = VecDeque::new();
     let mut enough_to_start = false;
 
-    //let player: Players = Players::from(AlsaPlayer::new()?);
-    let mut player: Players = Players::from(FilePlayer::new(std::path::Path::new("out.pcm"))?);
+    #[cfg(feature = "alsa")]
+    let mut player: Players = Players::from(Alsa::new()?);
+    #[cfg(not(any(feature = "alsa", feature = "pulse")))]
+    let mut player: Players = Players::from(File::new(std::path::Path::new("out.pcm"))?);
 
     loop {
-        // assumes multiple packets per read, but never half a packet, will panic
-        let mut remaining_bytes = s.read(&mut pkt_buf)?;
-        let mut read_bytes = 0;
+        s.read_exact(&mut hdr_buf)?;
+        let b = Base::from(hdr_buf.as_slice());
+        s.read_exact(&mut pkt_buf[0..b.size as usize])?;
 
-        while remaining_bytes > 0 {
-            let b = Base::from(&pkt_buf[read_bytes..]);
-            remaining_bytes -= b.total_size();
-            read_bytes += b.total_size();
+        let decoded_m = b.decode(&pkt_buf[0..b.size as usize]);
+        match decoded_m {
+            ServerMessage::CodecHeader(ch) => _ = dec.insert(Decoder::new(ch)?),
+            ServerMessage::WireChunk(wc) => {
+                if let Some(ref mut dec) = dec {
+                    let s = dec.decode_sample(wc.payload, &mut samples_out)?;
 
-            let decoded_m = b.decode();
-            match decoded_m {
-                ServerMessage::CodecHeader(ch) => _ = dec.insert(Decoder::new(ch)?),
-                ServerMessage::WireChunk(wc) => {
-                    if let Some(ref mut dec) = dec {
-                        let s = dec.decode_sample(wc.payload, &mut samples_out)?;
-
-                        buf_samples.push_back(samples_out[0..s].to_vec());
-                        if buf_samples.len() > 2 {
-                            enough_to_start = true;
-                        }
-                        if enough_to_start {
-                            if let Some(buffered_sample) = buf_samples.pop_front() {
-                                player.play()?;
-                                player.write(&buffered_sample)?;
-                            }
+                    buf_samples.push_back(samples_out[0..s].to_vec());
+                    if buf_samples.len() > 2 {
+                        enough_to_start = true;
+                    }
+                    if enough_to_start {
+                        if let Some(buffered_sample) = buf_samples.pop_front() {
+                            player.play()?;
+                            player.write(&buffered_sample)?;
                         }
                     }
                 }
-                other => println!("unhandled: {:?}", other),
             }
+            other => println!("unhandled: {:?}", other),
         }
     }
 }
