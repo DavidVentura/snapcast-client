@@ -14,6 +14,15 @@ impl From<&[u8]> for TimeVal {
         }
     }
 }
+impl From<TimeVal> for Vec<u8> {
+    fn from(tv: TimeVal) -> Vec<u8> {
+        let mut v = Vec::with_capacity(8);
+        v.extend_from_slice(&i32::to_le_bytes(tv.sec));
+        v.extend_from_slice(&i32::to_le_bytes(tv.usec));
+        v
+    }
+}
+
 #[repr(u16)]
 #[derive(Copy, Clone, Debug)]
 pub enum MessageType {
@@ -162,6 +171,27 @@ impl Base {
     }
 }
 
+impl Time {
+    // TODO: this should be a TimeReq which is mut
+    // to prevent these stupid 8 byte allocations (latency)
+    pub(crate) fn as_buf(
+        id: u16,
+        sent_tv: TimeVal,
+        received_tv: TimeVal,
+        latency: TimeVal,
+    ) -> Vec<u8> {
+        let payload = Vec::<u8>::from(latency);
+        Base {
+            mtype: MessageType::Time,
+            id,
+            refers_to: 0,
+            sent_tv,
+            received_tv,
+            size: payload.len() as u32,
+        }
+        .as_buf(&payload)
+    }
+}
 impl<'a> ClientHello<'a> {
     fn as_buf(&self) -> Vec<u8> {
         let p_str = serde_json::to_string(&self).unwrap();
