@@ -59,6 +59,8 @@ fn main() -> anyhow::Result<()> {
 
     let mut player: Option<Players> = None;
 
+    let mut sample_goal = 0;
+    let mut buffer_len = 999; // default
     loop {
         s.read_exact(&mut hdr_buf)?;
         let b = Base::from(hdr_buf.as_slice());
@@ -70,11 +72,21 @@ fn main() -> anyhow::Result<()> {
                 _ = dec.insert(Decoder::new(&ch)?);
 
                 #[cfg(feature = "alsa")]
-                let p: Players = Players::from(Alsa::new(ch.metadata.rate())?);
+                {
+                    let p: Players = Players::from(Alsa::new(ch.metadata.rate())?);
+                    _ = player.insert(p);
+                }
                 #[cfg(not(any(feature = "alsa", feature = "pulse")))]
-                let p: Players = Players::from(File::new(std::path::Path::new("out.pcm"))?);
-
-                _ = player.insert(p);
+                {
+                    println!("Compiled without support for pulse/alsa, outputting to out.pcm");
+                    let p: Players = Players::from(File::new(std::path::Path::new("out.pcm"))?);
+                    _ = player.insert(p);
+                }
+                sample_goal = buffer_len / 1000 * ch.metadata.rate();
+                println!(
+                    "buffer goal: {buffer_len}, need samples: {sample_goal}\n{:?}",
+                    ch
+                );
             }
             ServerMessage::WireChunk(wc) => {
                 //println!("wc ts {:?}", wc.timestamp);
@@ -83,10 +95,12 @@ fn main() -> anyhow::Result<()> {
                     let s = dec.decode_sample(wc.payload, &mut samples_out)?;
 
                     buf_samples.push_back(samples_out[0..s].to_vec());
-                    //buf_samples.push_back(samples_out.to_vec());
-                    if buf_samples.len() > 2 {
+
+                    // assuming all sample blocks have the same len, otherwise need to extend
+                    if (buf_samples.len() - 1) * s > sample_goal {
                         enough_to_start = true;
                     }
+
                     if enough_to_start {
                         if let Some(buffered_sample) = buf_samples.pop_front() {
                             if let Some(ref mut p) = player {
@@ -96,6 +110,10 @@ fn main() -> anyhow::Result<()> {
                         }
                     }
                 }
+            }
+
+            ServerMessage::ServerSettings(s) => {
+                buffer_len = s.bufferMs as usize;
             }
             other => (), //println!("unhandled: {:?}", other),
         }
