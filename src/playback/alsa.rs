@@ -3,12 +3,12 @@ use alsa::{Direction, ValueOr};
 
 use super::Player;
 
-pub struct AlsaPlayer {
+pub struct Alsa {
     pcm: PCM,
 }
 
-impl AlsaPlayer {
-    pub fn new() -> anyhow::Result<AlsaPlayer> {
+impl Alsa {
+    pub fn new() -> anyhow::Result<Alsa> {
         // Open default playback device
         let pcm = PCM::new("default", Direction::Playback, false)?;
 
@@ -30,17 +30,17 @@ impl AlsaPlayer {
             pcm.sw_params(&swp)?;
         }
 
-        Ok(AlsaPlayer { pcm })
+        Ok(Alsa { pcm })
     }
 }
-impl Player for AlsaPlayer {
+impl Player for Alsa {
     fn play(&self) -> anyhow::Result<()> {
         if self.pcm.state() != State::Running {
             self.pcm.start()?;
         }
         Ok(())
     }
-    fn write(&self, buf: &[i16]) -> anyhow::Result<()> {
+    fn write(&mut self, buf: &[i16]) -> anyhow::Result<()> {
         let io = self.pcm.io_i16()?;
         io.writei(buf)?;
         Ok(())
