@@ -48,9 +48,8 @@ fn main() -> anyhow::Result<()> {
     let mut dec: Option<Decoder> = None;
 
     // >= (960 * 2) for OPUS
-    // == 2880 for PCM
-    let mut samples_out = vec![0; 2880];
-    let mut samples_out = vec![0; 2646];
+    // >= 2880 for PCM
+    let mut samples_out = vec![0; 4096];
 
     let mut hdr_buf = vec![0; 26];
     // localhost MTU is pretty large )
@@ -69,7 +68,6 @@ fn main() -> anyhow::Result<()> {
         match decoded_m {
             ServerMessage::CodecHeader(ch) => {
                 _ = dec.insert(Decoder::new(&ch)?);
-                println!("{:?}", ch);
 
                 #[cfg(feature = "alsa")]
                 let p: Players = Players::from(Alsa::new(ch.metadata.rate())?);
@@ -99,7 +97,7 @@ fn main() -> anyhow::Result<()> {
                     }
                 }
             }
-            other => println!("unhandled: {:?}", other),
+            other => (), //println!("unhandled: {:?}", other),
         }
     }
 }
