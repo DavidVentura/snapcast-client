@@ -11,6 +11,9 @@ pub mod pulse;
 pub mod file;
 pub(crate) use file::File;
 
+pub mod tcp;
+pub(crate) use tcp::Tcp;
+
 use enum_dispatch::enum_dispatch;
 
 #[enum_dispatch]
@@ -26,4 +29,5 @@ pub enum Players {
     #[cfg(feature = "pulse")]
     Pulse,
     File,
+    Tcp,
 }

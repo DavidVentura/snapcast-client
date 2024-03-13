@@ -12,7 +12,7 @@ impl Pulse {
         let spec = Spec {
             format: Format::S16NE,
             channels: 2,
-            rate,
+            rate: rate as u32,
         };
         let pulse = Simple::new(
             None,                // Use the default server
