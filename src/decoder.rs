@@ -15,7 +15,7 @@ pub(crate) enum Decoder {
 impl Decoder {
     pub fn new(ch: &CodecHeader) -> anyhow::Result<Decoder> {
         match &ch.metadata {
-            CodecMetadata::Opaque(header) => {
+            CodecMetadata::Pcm(header) => {
                 // TODO: discriminate opaque types
                 Ok(Decoder::PCM(NoOpDecoder {}))
             }
@@ -29,8 +29,9 @@ impl Decoder {
                     };
                     return Ok(Decoder::Opus(opus::Decoder::new(config.sample_rate, c)?));
                 }
-                anyhow::bail!("Codec not supported");
+                anyhow::bail!("Opus disabled at build time");
             }
+            _ => anyhow::bail!("Don't know how to handle {:?}", ch.metadata),
         }
     }
 }
