@@ -31,29 +31,23 @@ fn main() -> anyhow::Result<()> {
     let mut send_side = s.try_clone()?;
 
     let time_base_c = time::Instant::now();
-
-    let now = time_base_c.elapsed();
-    let tv = TimeVal {
-        sec: now.as_secs() as i32, // allows for 68 years of uptime
-        usec: now.subsec_micros() as i32,
-    };
-    println!("my delta {now:?} {tv:?}");
-    let t = Time::as_buf(0, tv, tv, tv);
-    send_side.write_all(&t).unwrap();
+    let time_zero = time_base_c.elapsed();
 
     std::thread::spawn(move || {
-        let mut i: u16 = 1;
+        let mut i: u32 = 0;
         loop {
-            std::thread::sleep(time::Duration::from_millis(100));
             let now = time_base_c.elapsed();
             let tv = TimeVal {
                 sec: now.as_secs() as i32, // allows for 68 years of uptime
                 usec: now.subsec_micros() as i32,
             };
-            //println!("my delta {:?}", now);
-            let t = Time::as_buf(i, tv, tv, tv);
+            let t = Time::as_buf(i as u16, tv, tv, tv);
             send_side.write_all(&t).unwrap();
-            i = i.wrapping_add(1);
+            i = i.wrapping_add(1); // wraps every 136 years
+
+            // on startup, calibrate latency 50 times
+            let sleep_len = if i > 50 { 1000 } else { 1 };
+            std::thread::sleep(time::Duration::from_millis(sleep_len));
         }
     });
 
@@ -75,16 +69,40 @@ fn main() -> anyhow::Result<()> {
         // >= (960 * 2) for OPUS
         // >= 2880 for PCM
         let mut samples_out = vec![0; 4096];
+
+        let mut player_lat_ms: u16 = 0;
         while let Ok((client_audible_ts, samples)) = sample_rx.recv() {
-            // Guard against chunks coming before the decoder is initialized
-            if let Some(ref mut dec) = *dec.lock().unwrap() {
-                let decoded_sample_c = dec.decode_sample(&samples, &mut samples_out).unwrap();
-                let sample = &samples_out[0..decoded_sample_c];
-                if let Some(ref mut p) = *player.lock().unwrap() {
-                    p.play().unwrap();
-                    p.write(sample).unwrap();
+            let mut valid = true;
+            loop {
+                let remaining = client_audible_ts - time_base_c.elapsed().into();
+                if remaining.sec < 0 {
+                    valid = false;
+                    break;
                 }
+
+                if remaining.millis().unwrap() <= player_lat_ms {
+                    break;
+                }
+                std::thread::sleep(time::Duration::from_millis(1));
             }
+
+            if !valid {
+                println!("aaa in the past");
+                continue;
+            }
+
+            // Guard against chunks coming before the decoder is initialized
+            let Some(ref mut dec) = *dec.lock().unwrap() else {
+                continue;
+            };
+            let Some(ref mut p) = *player.lock().unwrap() else {
+                continue;
+            };
+            player_lat_ms = p.latency_ms().unwrap();
+            let decoded_sample_c = dec.decode_sample(&samples, &mut samples_out).unwrap();
+            let sample = &samples_out[0..decoded_sample_c];
+            p.play().unwrap();
+            p.write(sample).unwrap();
         }
     });
 
@@ -122,19 +140,21 @@ fn main() -> anyhow::Result<()> {
                 }
             }
             ServerMessage::WireChunk(wc) => {
-                let t_c = TimeVal::from(time_base_c.elapsed());
-                let audible_at = t_c + tbase_adj + buffer_ms - local_latency;
-                sample_tx.send((audible_at, wc.payload.to_vec()));
+                let t_s = wc.timestamp;
+                let t_c = t_s - tbase_adj;
+                let audible_at = t_c + buffer_ms - local_latency;
+                sample_tx.send((audible_at, wc.payload.to_vec()))?;
             }
 
             ServerMessage::ServerSettings(s) => {
                 buffer_ms = TimeVal::from_millis(s.bufferMs as i32);
                 local_latency = TimeVal::from_millis(s.latency as i32);
+                // TODO volume
             }
             ServerMessage::Time(t) => {
                 // TODO median for these 2
                 // time_base_s == t.latency;
-                tbase_adj = t.latency - time_base_c.elapsed().into();
+                tbase_adj = t.latency - time_zero.into();
             }
         }
     }
