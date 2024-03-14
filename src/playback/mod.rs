@@ -20,6 +20,7 @@ use enum_dispatch::enum_dispatch;
 pub(crate) trait Player {
     fn play(&self) -> anyhow::Result<()>;
     fn write(&mut self, buf: &[i16]) -> anyhow::Result<()>;
+    fn latency_ms(&self) -> anyhow::Result<u16>;
 }
 
 #[enum_dispatch(Player)]

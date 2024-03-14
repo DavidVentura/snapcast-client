@@ -16,6 +16,11 @@ impl Player for Tcp {
         self.s.write_all(converted)?;
         Ok(())
     }
+
+    fn latency_ms(&self) -> anyhow::Result<u16> {
+        // ?
+        Ok(0)
+    }
 }
 
 impl Tcp {

@@ -37,4 +37,7 @@ impl Player for Pulse {
         let (_, converted, _) = unsafe { buf.align_to::<u8>() };
         Ok(self.pulse.write(converted)?)
     }
+    fn latency_ms(&self) -> anyhow::Result<u16> {
+        Ok(self.pulse.get_latency()?.as_millis() as u16)
+    }
 }

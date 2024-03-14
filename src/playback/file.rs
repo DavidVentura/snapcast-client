@@ -14,6 +14,9 @@ impl Player for File {
         self.f.write_all(converted)?;
         Ok(())
     }
+    fn latency_ms(&self) -> anyhow::Result<u16> {
+        Ok(0)
+    }
 }
 
 impl File {
