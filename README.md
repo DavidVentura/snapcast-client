@@ -15,6 +15,17 @@ pactl load-module module-simple-protocol-tcp rate=48000 format=s16le channels=2 
 
 This implementation behaves very similarly as the official one in regards to latency; measured with the scope and an 'audio/video sync test' playback:
 
+Measurement notes:
+
+* Tests on the ALSA back-end
+* Yellow = this repo
+* Cyan = official snapclient
+* Blue plays via USB-C -> Screen -> Audio out
+* Yellow plays via the Audio out port on my computer
+
+It seems like this implementation is ~8ms lower latency, compared to the official one. I'm not sure why, as it should compensate for audio buffer size. I kinda hope it's due to the audio cards.
+
+
 0ms added latency on the rs implementation:
 
 ![](https://github.com/DavidVentura/snapcast-client/blob/master/images/snapclient-v-rs-0ms-conf-lat.png?raw=true)
