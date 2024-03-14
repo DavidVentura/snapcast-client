@@ -29,6 +29,16 @@ impl TimeVal {
         }
         .normalize()
     }
+    pub fn millis(&self) -> anyhow::Result<u16> {
+        let s = self.normalize();
+        if s.sec != 0 {
+            anyhow::bail!(format!("sec {s:?} is != 0"));
+        }
+        if s.usec < 0 {
+            anyhow::bail!(format!("usec {s:?} is < 0"));
+        }
+        Ok((s.usec / 1000) as u16)
+    }
 }
 impl From<&[u8]> for TimeVal {
     fn from(buf: &[u8]) -> TimeVal {
