@@ -15,6 +15,7 @@ use proto::{Base, Server, ServerMessage, Time, TimeVal};
 
 use std::io::prelude::*;
 use std::net::TcpStream;
+use std::sync::{mpsc, Arc, Mutex};
 use std::time;
 
 fn main() -> anyhow::Result<()> {
@@ -29,9 +30,9 @@ fn main() -> anyhow::Result<()> {
 
     let mut send_side = s.try_clone()?;
 
-    let start = time::Instant::now();
+    let time_base_c = time::Instant::now();
 
-    let now = start.elapsed();
+    let now = time_base_c.elapsed();
     let tv = TimeVal {
         sec: now.as_secs() as i32, // allows for 68 years of uptime
         usec: now.subsec_micros() as i32,
@@ -44,7 +45,7 @@ fn main() -> anyhow::Result<()> {
         let mut i: u16 = 1;
         loop {
             std::thread::sleep(time::Duration::from_millis(100));
-            let now = start.elapsed();
+            let now = time_base_c.elapsed();
             let tv = TimeVal {
                 sec: now.as_secs() as i32, // allows for 68 years of uptime
                 usec: now.subsec_micros() as i32,
@@ -56,24 +57,40 @@ fn main() -> anyhow::Result<()> {
         }
     });
 
-    let mut dec: Option<Decoder> = None;
+    let dec: Arc<Mutex<Option<Decoder>>> = Arc::new(Mutex::new(None));
+    let dec_2 = dec.clone();
 
-    // >= (960 * 2) for OPUS
-    // >= 2880 for PCM
-    let mut samples_out = vec![0; 4096];
+    let player: Arc<Mutex<Option<Players>>> = Arc::new(Mutex::new(None));
+    let player_2 = player.clone();
+
+    let mut buffer_ms = TimeVal {
+        sec: 0,
+        usec: 999_999,
+    };
+    let mut local_latency = TimeVal { sec: 0, usec: 0 };
+    let mut tbase_adj = TimeVal { sec: 0, usec: 0 }; // t_s - t_c
+
+    let (sample_tx, sample_rx) = mpsc::channel::<(TimeVal, Vec<u8>)>();
+    std::thread::spawn(move || {
+        // >= (960 * 2) for OPUS
+        // >= 2880 for PCM
+        let mut samples_out = vec![0; 4096];
+        while let Ok((client_audible_ts, samples)) = sample_rx.recv() {
+            // Guard against chunks coming before the decoder is initialized
+            if let Some(ref mut dec) = *dec.lock().unwrap() {
+                let decoded_sample_c = dec.decode_sample(&samples, &mut samples_out).unwrap();
+                let sample = &samples_out[0..decoded_sample_c];
+                if let Some(ref mut p) = *player.lock().unwrap() {
+                    p.play().unwrap();
+                    p.write(sample).unwrap();
+                }
+            }
+        }
+    });
 
     let mut hdr_buf = vec![0; 26];
     // localhost MTU is pretty large )
     let mut pkt_buf = vec![0; 6000];
-    let mut buf_samples = VecDeque::new();
-    let mut enough_to_start = false;
-
-    let mut player: Option<Players> = None;
-
-    let mut sample_goal = 0;
-    let mut buffer_len = 999; // default
-
-    let mut time_diff = time::Duration::from_micros(0);
     loop {
         s.read_exact(&mut hdr_buf)?;
         let b = Base::from(hdr_buf.as_slice());
@@ -82,72 +99,42 @@ fn main() -> anyhow::Result<()> {
         let decoded_m = b.decode(&pkt_buf[0..b.size as usize]);
         match decoded_m {
             ServerMessage::CodecHeader(ch) => {
-                _ = dec.insert(Decoder::new(&ch)?);
+                _ = dec_2.lock().unwrap().insert(Decoder::new(&ch)?);
 
                 #[cfg(feature = "alsa")]
                 {
                     let p: Players = Players::from(Alsa::new(ch.metadata.rate())?);
-                    _ = player.insert(p);
+                    _ = player_2.lock().unwrap().insert(p);
                 }
                 #[cfg(feature = "pulse")]
                 {
                     let p: Players = Players::from(Pulse::new(ch.metadata.rate())?);
-                    _ = player.insert(p);
+                    _ = player_2.lock().unwrap().insert(p);
                 }
                 #[cfg(not(any(feature = "alsa", feature = "pulse")))]
                 {
                     println!("Compiled without support for pulse/alsa, outputting to TCP");
                     let p: Players = Players::from(Tcp::new("127.0.0.1:12345")?);
-                    _ = player.insert(p);
+                    _ = player_2.lock().unwrap().insert(p);
                     //println!("Compiled without support for pulse/alsa, outputting to out.pcm");
                     //let p: Players = Players::from(File::new(std::path::Path::new("out.pcm"))?);
-                    //_ = player.insert(p);
+                    //_ = player_2.lock().unwrap().insert(p);
                 }
-                sample_goal = buffer_len / 1000 * ch.metadata.rate();
-                println!(
-                    "buffer goal: {buffer_len}, need samples: {sample_goal}\n{:?}",
-                    ch
-                );
             }
             ServerMessage::WireChunk(wc) => {
-                println!(
-                    "wc ts {:?}, now {:?}, delta {:?}",
-                    wc.timestamp,
-                    time_diff + start.elapsed(),
-                    (time_diff + start.elapsed()) - wc.timestamp
-                );
-                // Guard against chunks coming before the decoder is initialized
-                if let Some(ref mut dec) = dec {
-                    let s = dec.decode_sample(wc.payload, &mut samples_out)?;
-
-                    buf_samples.push_back(samples_out[0..s].to_vec());
-
-                    // assuming all sample blocks have the same len, otherwise need to extend
-                    if (buf_samples.len() - 1) * s > sample_goal {
-                        enough_to_start = true;
-                    }
-
-                    if enough_to_start {
-                        if let Some(buffered_sample) = buf_samples.pop_front() {
-                            if let Some(ref mut p) = player {
-                                p.play()?;
-                                p.write(&buffered_sample)?;
-                            }
-                        }
-                    }
-                }
+                let t_c = TimeVal::from(time_base_c.elapsed());
+                let audible_at = t_c + tbase_adj + buffer_ms - local_latency;
+                sample_tx.send((audible_at, wc.payload.to_vec()));
             }
 
             ServerMessage::ServerSettings(s) => {
-                buffer_len = s.bufferMs as usize;
+                buffer_ms = TimeVal::from_millis(s.bufferMs as i32);
+                local_latency = TimeVal::from_millis(s.latency as i32);
             }
             ServerMessage::Time(t) => {
-                let received = start.elapsed();
-                let latency_c2s = t;
-                let latency_s2c = received - b.sent_tv;
-
-                time_diff = (latency_c2s - latency_s2c) / 2;
-                println!("diff {time_diff:?} + ctr {:?}", time_diff + received);
+                // TODO median for these 2
+                // time_base_s == t.latency;
+                tbase_adj = t.latency - time_base_c.elapsed().into();
             }
         }
     }
