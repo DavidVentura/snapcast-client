@@ -63,7 +63,6 @@ fn main() -> anyhow::Result<()> {
         usec: 999_999,
     };
     let mut local_latency = TimeVal { sec: 0, usec: 0 };
-    let mut tbase_adj = TimeVal { sec: 0, usec: 0 }; // t_s - t_c
 
     let (sample_tx, sample_rx) = mpsc::channel::<(TimeVal, Vec<u8>)>();
     std::thread::spawn(move || {
@@ -71,7 +70,7 @@ fn main() -> anyhow::Result<()> {
         // >= 2880 for PCM
         let mut samples_out = vec![0; 4096];
 
-        let mut player_lat_ms: u16 = 0;
+        let mut player_lat_ms: u16 = 1;
         while let Ok((client_audible_ts, samples)) = sample_rx.recv() {
             let mut valid = true;
             loop {
@@ -99,7 +98,8 @@ fn main() -> anyhow::Result<()> {
             let Some(ref mut p) = *player.lock().unwrap() else {
                 continue;
             };
-            player_lat_ms = p.latency_ms().unwrap();
+            // Backends with 0ms of buffer (file, tcp) otherwise behave erratically
+            player_lat_ms = std::cmp::max(1, p.latency_ms().unwrap());
             let decoded_sample_c = dec.decode_sample(&samples, &mut samples_out).unwrap();
             let sample = &samples_out[0..decoded_sample_c];
             p.play().unwrap();
@@ -142,10 +142,11 @@ fn main() -> anyhow::Result<()> {
             }
             ServerMessage::WireChunk(wc) => {
                 let t_s = wc.timestamp;
+
+                // TODO this should be allocated once
                 let mut sorted = latency_buf.to_vec();
                 sorted.sort();
                 let median_tbase = sorted[sorted.len() / 2];
-                println!("median tb {:?}", median_tbase);
                 let t_c = t_s - median_tbase;
                 let audible_at = t_c + buffer_ms - local_latency;
                 sample_tx.send((audible_at, wc.payload.to_vec()))?;
@@ -158,9 +159,7 @@ fn main() -> anyhow::Result<()> {
                 // TODO volume
             }
             ServerMessage::Time(t) => {
-                // TODO median for these 2
-                tbase_adj = t.latency - time_zero.into();
-                println!("tbase adj {:?}", tbase_adj);
+                let tbase_adj = t.latency - time_zero.into();
                 latency_buf.push_back(tbase_adj);
             }
         }
