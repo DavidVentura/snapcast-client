@@ -3,8 +3,9 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Ord, PartialOrd)]
 pub struct TimeVal {
+    // order of fields matter for Ord/PartialOrd derives
     pub sec: i32,
     pub usec: i32,
 }
@@ -40,6 +41,7 @@ impl TimeVal {
         Ok((s.usec / 1000) as u16)
     }
 }
+
 impl From<&[u8]> for TimeVal {
     fn from(buf: &[u8]) -> TimeVal {
         TimeVal {

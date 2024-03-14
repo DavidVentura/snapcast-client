@@ -9,7 +9,7 @@ use playback::Alsa;
 use playback::Pulse;
 use playback::{File, Player, Players, Tcp};
 
-use std::collections::VecDeque;
+use circular_buffer::CircularBuffer;
 
 use proto::{Base, Server, ServerMessage, Time, TimeVal};
 
@@ -51,6 +51,7 @@ fn main() -> anyhow::Result<()> {
         }
     });
 
+    let mut latency_buf = CircularBuffer::<50, TimeVal>::new();
     let dec: Arc<Mutex<Option<Decoder>>> = Arc::new(Mutex::new(None));
     let dec_2 = dec.clone();
 
@@ -141,7 +142,11 @@ fn main() -> anyhow::Result<()> {
             }
             ServerMessage::WireChunk(wc) => {
                 let t_s = wc.timestamp;
-                let t_c = t_s - tbase_adj;
+                let mut sorted = latency_buf.to_vec();
+                sorted.sort();
+                let median_tbase = sorted[sorted.len() / 2];
+                println!("median tb {:?}", median_tbase);
+                let t_c = t_s - median_tbase;
                 let audible_at = t_c + buffer_ms - local_latency;
                 sample_tx.send((audible_at, wc.payload.to_vec()))?;
             }
@@ -149,12 +154,14 @@ fn main() -> anyhow::Result<()> {
             ServerMessage::ServerSettings(s) => {
                 buffer_ms = TimeVal::from_millis(s.bufferMs as i32);
                 local_latency = TimeVal::from_millis(s.latency as i32);
+                println!("local lat now {local_latency:?}");
                 // TODO volume
             }
             ServerMessage::Time(t) => {
                 // TODO median for these 2
-                // time_base_s == t.latency;
                 tbase_adj = t.latency - time_zero.into();
+                println!("tbase adj {:?}", tbase_adj);
+                latency_buf.push_back(tbase_adj);
             }
         }
     }
