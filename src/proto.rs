@@ -1,4 +1,4 @@
-use std::ops::Sub;
+use std::ops::{Add, Sub};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -9,6 +9,27 @@ pub struct TimeVal {
     pub usec: i32,
 }
 
+impl TimeVal {
+    fn normalize(mut self) -> Self {
+        while self.usec > 1_000_000 {
+            self.usec -= 1_000_000;
+            self.sec += 1;
+        }
+        while self.usec < 0 {
+            self.usec += 1_000_000;
+            self.sec -= 1;
+        }
+
+        self
+    }
+    pub fn from_millis(millis: i32) -> TimeVal {
+        TimeVal {
+            sec: 0,
+            usec: millis * 1000,
+        }
+        .normalize()
+    }
+}
 impl From<&[u8]> for TimeVal {
     fn from(buf: &[u8]) -> TimeVal {
         TimeVal {
@@ -18,33 +39,29 @@ impl From<&[u8]> for TimeVal {
     }
 }
 
-impl Sub<TimeVal> for Duration {
-    type Output = Duration;
-    fn sub(self, t: TimeVal) -> Duration {
-        let mut sec = self.as_secs() as i32 - t.sec;
-        let mut usec = self.subsec_micros() as i32 - t.usec;
-
-        if usec < 0 {
-            usec = 1_000_000 + usec;
-            sec -= 1;
+impl From<Duration> for TimeVal {
+    fn from(d: Duration) -> TimeVal {
+        TimeVal {
+            sec: d.as_secs() as i32,
+            usec: d.subsec_micros() as i32,
         }
-        let d = Duration::from_secs(sec as u64);
-        d + Duration::from_micros(usec as u64)
     }
 }
-impl Sub<Duration> for Time {
-    type Output = Duration;
-    fn sub(self, d: Duration) -> Duration {
-        let mut sec = self.latency.sec - d.as_secs() as i32;
-        let mut usec = self.latency.usec - d.subsec_micros() as i32;
 
-        if usec < 0 {
-            usec = 1_000_000 + usec;
-            sec -= 1;
-        }
-
-        let d = Duration::from_secs(sec as u64);
-        d + Duration::from_micros(usec as u64)
+impl Add<TimeVal> for TimeVal {
+    type Output = TimeVal;
+    fn add(self, other: TimeVal) -> TimeVal {
+        let sec = self.sec + other.sec;
+        let usec = self.usec + other.usec;
+        TimeVal { sec, usec }.normalize()
+    }
+}
+impl Sub<TimeVal> for TimeVal {
+    type Output = TimeVal;
+    fn sub(self, other: TimeVal) -> TimeVal {
+        let sec = self.sec - other.sec;
+        let usec = self.usec - other.usec;
+        TimeVal { sec, usec }.normalize()
     }
 }
 
@@ -328,7 +345,7 @@ pub struct WireChunk<'a> {
 }
 #[derive(Debug)]
 pub struct Time {
-    latency: TimeVal,
+    pub(crate) latency: TimeVal,
 }
 #[allow(non_snake_case)]
 #[derive(Serialize)]
