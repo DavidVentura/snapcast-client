@@ -1,3 +1,6 @@
+use std::ops::Sub;
+use std::time::Duration;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Copy, Clone, Debug)]
@@ -14,6 +17,37 @@ impl From<&[u8]> for TimeVal {
         }
     }
 }
+
+impl Sub<TimeVal> for Duration {
+    type Output = Duration;
+    fn sub(self, t: TimeVal) -> Duration {
+        let mut sec = self.as_secs() as i32 - t.sec;
+        let mut usec = self.subsec_micros() as i32 - t.usec;
+
+        if usec < 0 {
+            usec = 1_000_000 + usec;
+            sec -= 1;
+        }
+        let d = Duration::from_secs(sec as u64);
+        d + Duration::from_micros(usec as u64)
+    }
+}
+impl Sub<Duration> for Time {
+    type Output = Duration;
+    fn sub(self, d: Duration) -> Duration {
+        let mut sec = self.latency.sec - d.as_secs() as i32;
+        let mut usec = self.latency.usec - d.subsec_micros() as i32;
+
+        if usec < 0 {
+            usec = 1_000_000 + usec;
+            sec -= 1;
+        }
+
+        let d = Duration::from_secs(sec as u64);
+        d + Duration::from_micros(usec as u64)
+    }
+}
+
 impl From<TimeVal> for Vec<u8> {
     fn from(tv: TimeVal) -> Vec<u8> {
         let mut v = Vec::with_capacity(8);
@@ -64,8 +98,8 @@ pub struct Base {
     mtype: MessageType,
     id: u16,
     refers_to: u16,
-    sent_tv: TimeVal,
-    received_tv: TimeVal,
+    pub(crate) sent_tv: TimeVal,
+    pub(crate) received_tv: TimeVal,
     pub(crate) size: u32,
 }
 
