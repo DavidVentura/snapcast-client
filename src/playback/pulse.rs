@@ -40,4 +40,8 @@ impl Player for Pulse {
     fn latency_ms(&self) -> anyhow::Result<u16> {
         Ok(self.pulse.get_latency()?.as_millis() as u16)
     }
+    fn set_volume(&self, val: u8) -> anyhow::Result<()> {
+        //self.pulse.
+        Ok(())
+    }
 }

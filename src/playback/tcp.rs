@@ -21,6 +21,10 @@ impl Player for Tcp {
         // ?
         Ok(0)
     }
+    fn set_volume(&self, _val: u8) -> anyhow::Result<()> {
+        // ?
+        Ok(())
+    }
 }
 
 impl Tcp {

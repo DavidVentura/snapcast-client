@@ -17,6 +17,10 @@ impl Player for File {
     fn latency_ms(&self) -> anyhow::Result<u16> {
         Ok(0)
     }
+    fn set_volume(&self, _val: u8) -> anyhow::Result<()> {
+        // ?
+        Ok(())
+    }
 }
 
 impl File {

@@ -21,6 +21,7 @@ pub(crate) trait Player {
     fn play(&self) -> anyhow::Result<()>;
     fn write(&mut self, buf: &[i16]) -> anyhow::Result<()>;
     fn latency_ms(&self) -> anyhow::Result<u16>;
+    fn set_volume(&self, val: u8) -> anyhow::Result<()>;
 }
 
 #[enum_dispatch(Player)]
