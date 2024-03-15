@@ -1,7 +1,7 @@
 use crate::proto::{Base, ClientHello, ServerMessage, Time, TimeVal};
 use circular_buffer::CircularBuffer;
 use std::io::prelude::*;
-use std::net::TcpStream;
+use std::net::{TcpStream, ToSocketAddrs};
 use std::time::{Duration, Instant};
 
 pub struct Client {
@@ -15,6 +15,7 @@ pub struct ConnectedClient {
     conn_tx: TcpStream,
     time_zero: Duration,
     time_base: Instant,
+    last_time_sent: Instant,
     latency_buf: CircularBuffer<50, TimeVal>,
     sorted_latency_buf: Vec<TimeVal>,
     hdr_buf: Vec<u8>,
@@ -43,6 +44,7 @@ impl ConnectedClient {
             pkt_buf: vec![0; 6000], // pcm data is up to 4880b i think
             sorted_latency_buf: vec![tv_zero; cap],
             pkt_id: 0,
+            last_time_sent: Instant::now(),
         })
     }
 
@@ -66,8 +68,17 @@ impl ConnectedClient {
 
     // TODO: should be a narrower type, filter time out?
     pub fn tick(&mut self) -> anyhow::Result<ServerMessage> {
-        if self.latency_buf.len() < self.latency_buf.capacity() {
+        let lts = self.last_time_sent.elapsed();
+        let filling_buf = self.latency_buf.len() < self.latency_buf.capacity();
+        let empty = self.latency_buf.len() == 0;
+
+        // Want to fill the initial latency buffer fairly quickly (100ms between iters)
+        // afterwards, a measurement a second should be OK
+        // TODO: crash if this buffer is not full; so `lts.as_millis` is >= 0
+        // but it should be fixed instead
+        if empty || (filling_buf && lts.as_millis() >= 0) || lts.as_secs() >= 1 {
             self.send_time()?;
+            self.last_time_sent = Instant::now();
         }
 
         self.conn_rx.read_exact(&mut self.hdr_buf)?;
@@ -86,10 +97,13 @@ impl ConnectedClient {
         }
     }
 
+    /// Median latency out of the last 50 measurements
     pub fn latency_to_server(&mut self) -> TimeVal {
-        // FIXME alloc
         if self.latency_buf.len() == 0 {
-            return TimeVal { sec: 0, usec: 0 };
+            return TimeVal {
+                sec: 0,
+                usec: 1_000,
+            };
         }
         for (i, tv) in self.latency_buf.iter().enumerate() {
             self.sorted_latency_buf[i] = *tv;
@@ -104,8 +118,8 @@ impl ConnectedClient {
 }
 
 impl Client {
-    pub fn connect(&self) -> anyhow::Result<ConnectedClient> {
-        let conn = TcpStream::connect("192.168.2.131:1704")?;
+    pub fn connect<A: ToSocketAddrs>(&self, dst: A) -> anyhow::Result<ConnectedClient> {
+        let conn = TcpStream::connect(dst)?;
         let mut cc = ConnectedClient::new(conn)?;
 
         let hello = ClientHello {
