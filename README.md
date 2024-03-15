@@ -10,6 +10,9 @@ To use the `TCP` module, (or to avoid having to link to `libpulse`), you can ena
 pactl load-module module-simple-protocol-tcp rate=48000 format=s16le channels=2 playback=true port=12345 listen=127.0.0.1
 ```
 
+## Build
+
+For Coreelec, `bash build.sh` will run the build process in a 32-bit Docker container.
 
 ## Latency
 
