@@ -3,21 +3,17 @@ mod decoder;
 mod playback;
 mod proto;
 
-use clap::Parser;
-use decoder::{Decode, Decoder};
+use client::Client;
 #[cfg(feature = "alsa")]
 use playback::Alsa;
 #[cfg(feature = "pulse")]
 use playback::Pulse;
 use playback::{File, Player, Players, Tcp};
+use proto::{CodecHeader, ServerMessage, TimeVal};
 
-use circular_buffer::CircularBuffer;
+use clap::Parser;
+use decoder::{Decode, Decoder};
 
-use client::Client;
-use proto::{Base, CodecHeader, ServerMessage, Time, TimeVal};
-
-use std::io::prelude::*;
-use std::net::TcpStream;
 use std::sync::{mpsc, Arc, Mutex};
 use std::time;
 
@@ -39,39 +35,11 @@ struct Args {
 
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
-    let mut s = TcpStream::connect("192.168.2.131:1704")?;
-    s.set_nodelay(true)?;
 
-    let srv = Client::new("11:22:33:44:55:66".into(), "framework".into());
-    {
-        let b = srv.hello();
-        s.write_all(&b)?;
-    }
+    let client = Client::new("11:22:33:44:55:66".into(), "framework".into());
+    let mut client = client.connect()?;
+    let time_base_c = client.time_base();
 
-    let mut send_side = s.try_clone()?;
-
-    let time_base_c = time::Instant::now();
-    let time_zero = time_base_c.elapsed();
-
-    std::thread::spawn(move || {
-        let mut i: u32 = 0;
-        loop {
-            let now = time_base_c.elapsed();
-            let tv = TimeVal {
-                sec: now.as_secs() as i32, // allows for 68 years of uptime
-                usec: now.subsec_micros() as i32,
-            };
-            let t = Time::as_buf(i as u16, tv, tv, tv);
-            send_side.write_all(&t).unwrap();
-            i = i.wrapping_add(1); // wraps every 136 years
-
-            // on startup, calibrate latency 50 times
-            let sleep_len = if i > 50 { 1000 } else { 1 };
-            std::thread::sleep(time::Duration::from_millis(sleep_len));
-        }
-    });
-
-    let mut latency_buf = CircularBuffer::<50, TimeVal>::new();
     let dec: Arc<Mutex<Option<Decoder>>> = Arc::new(Mutex::new(None));
     let dec_2 = dec.clone();
 
@@ -85,58 +53,12 @@ fn main() -> anyhow::Result<()> {
     let mut local_latency = TimeVal { sec: 0, usec: 0 };
 
     let (sample_tx, sample_rx) = mpsc::channel::<(TimeVal, Vec<u8>)>();
-    std::thread::spawn(move || {
-        // >= (960 * 2) for OPUS
-        // >= 2880 for PCM
-        let mut samples_out = vec![0; 4096];
+    std::thread::spawn(move || handle_samples(sample_rx, time_base_c, player, dec));
 
-        let mut player_lat_ms: u16 = 1;
-        while let Ok((client_audible_ts, samples)) = sample_rx.recv() {
-            let mut valid = true;
-            loop {
-                let remaining = client_audible_ts - time_base_c.elapsed().into();
-                if remaining.sec < 0 {
-                    valid = false;
-                    break;
-                }
-
-                if remaining.millis().unwrap() <= player_lat_ms {
-                    break;
-                }
-                std::thread::sleep(time::Duration::from_millis(1));
-            }
-
-            if !valid {
-                println!("aaa in the past");
-                continue;
-            }
-
-            // Guard against chunks coming before the decoder is initialized
-            let Some(ref mut dec) = *dec.lock().unwrap() else {
-                continue;
-            };
-            let Some(ref mut p) = *player.lock().unwrap() else {
-                continue;
-            };
-            // Backends with 0ms of buffer (file, tcp) otherwise behave erratically
-            player_lat_ms = std::cmp::max(1, p.latency_ms().unwrap());
-            let decoded_sample_c = dec.decode_sample(&samples, &mut samples_out).unwrap();
-            let sample = &samples_out[0..decoded_sample_c];
-            p.play().unwrap();
-            p.write(sample).unwrap();
-        }
-    });
-
-    let mut hdr_buf = vec![0; 26];
-    // localhost MTU is pretty large )
-    let mut pkt_buf = vec![0; 6000];
     loop {
-        s.read_exact(&mut hdr_buf)?;
-        let b = Base::from(hdr_buf.as_slice());
-        s.read_exact(&mut pkt_buf[0..b.size as usize])?;
-
-        let decoded_m = b.decode(&pkt_buf[0..b.size as usize]);
-        match decoded_m {
+        let median_tbase = client.latency_to_server();
+        let msg = client.tick()?;
+        match msg {
             ServerMessage::CodecHeader(ch) => {
                 _ = dec_2.lock().unwrap().insert(Decoder::new(&ch)?);
                 let p = make_player(args.backend, &ch)?;
@@ -144,11 +66,6 @@ fn main() -> anyhow::Result<()> {
             }
             ServerMessage::WireChunk(wc) => {
                 let t_s = wc.timestamp;
-
-                // TODO this should be allocated once
-                let mut sorted = latency_buf.to_vec();
-                sorted.sort();
-                let median_tbase = sorted[sorted.len() / 2];
                 let t_c = t_s - median_tbase;
                 let audible_at = t_c + buffer_ms - local_latency;
                 sample_tx.send((audible_at, wc.payload.to_vec()))?;
@@ -160,11 +77,55 @@ fn main() -> anyhow::Result<()> {
                 println!("local lat now {local_latency:?}");
                 // TODO volume
             }
-            ServerMessage::Time(t) => {
-                let tbase_adj = t.latency - time_zero.into();
-                latency_buf.push_back(tbase_adj);
-            }
+            _ => (),
         }
+    }
+}
+
+fn handle_samples(
+    sample_rx: mpsc::Receiver<(TimeVal, Vec<u8>)>,
+    time_base_c: time::Instant,
+    player: Arc<Mutex<Option<Players>>>,
+    dec: Arc<Mutex<Option<Decoder>>>,
+) {
+    // >= (960 * 2) for OPUS
+    // >= 2880 for PCM
+    let mut samples_out = vec![0; 4096];
+
+    let mut player_lat_ms: u16 = 1;
+    while let Ok((client_audible_ts, samples)) = sample_rx.recv() {
+        let mut valid = true;
+        loop {
+            let remaining = client_audible_ts - time_base_c.elapsed().into();
+            if remaining.sec < 0 {
+                valid = false;
+                break;
+            }
+
+            if remaining.millis().unwrap() <= player_lat_ms {
+                break;
+            }
+            std::thread::sleep(time::Duration::from_millis(1));
+        }
+
+        if !valid {
+            println!("aaa in the past");
+            continue;
+        }
+
+        // Guard against chunks coming before the decoder is initialized
+        let Some(ref mut dec) = *dec.lock().unwrap() else {
+            continue;
+        };
+        let Some(ref mut p) = *player.lock().unwrap() else {
+            continue;
+        };
+        // Backends with 0ms of buffer (file, tcp) otherwise behave erratically
+        player_lat_ms = std::cmp::max(1, p.latency_ms().unwrap());
+        let decoded_sample_c = dec.decode_sample(&samples, &mut samples_out).unwrap();
+        let sample = &samples_out[0..decoded_sample_c];
+        p.play().unwrap();
+        p.write(sample).unwrap();
     }
 }
 

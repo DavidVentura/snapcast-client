@@ -105,6 +105,7 @@ pub enum ServerMessage<'a> {
     CodecHeader(CodecHeader<'a>),
     WireChunk(WireChunk<'a>),
     Time(Time),
+    Nothing,
 }
 
 impl From<u16> for MessageType {
@@ -204,7 +205,7 @@ impl<'a> From<&'a [u8]> for Base {
 }
 
 impl Base {
-    const BASE_SIZE: usize = 26;
+    pub const BASE_SIZE: usize = 26;
 
     pub fn decode<'a>(&self, payload: &'a [u8]) -> ServerMessage<'a> {
         match self.mtype {
