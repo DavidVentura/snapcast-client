@@ -1,3 +1,4 @@
+mod client;
 mod decoder;
 mod playback;
 mod proto;
@@ -12,7 +13,8 @@ use playback::{File, Player, Players, Tcp};
 
 use circular_buffer::CircularBuffer;
 
-use proto::{Base, CodecHeader, Server, ServerMessage, Time, TimeVal};
+use client::Client;
+use proto::{Base, CodecHeader, ServerMessage, Time, TimeVal};
 
 use std::io::prelude::*;
 use std::net::TcpStream;
@@ -40,7 +42,7 @@ fn main() -> anyhow::Result<()> {
     let mut s = TcpStream::connect("192.168.2.131:1704")?;
     s.set_nodelay(true)?;
 
-    let srv = Server::new("11:22:33:44:55:66".into(), "framework".into());
+    let srv = Client::new("11:22:33:44:55:66".into(), "framework".into());
     {
         let b = srv.hello();
         s.write_all(&b)?;

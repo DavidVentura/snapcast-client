@@ -256,7 +256,7 @@ impl Time {
     }
 }
 impl<'a> ClientHello<'a> {
-    fn as_buf(&self) -> Vec<u8> {
+    pub fn as_buf(&self) -> Vec<u8> {
         let p_str = serde_json::to_string(&self).unwrap();
         let payload = p_str.as_bytes();
         let mut payload_len_buf = u32::to_le_bytes(payload.len() as u32).to_vec();
@@ -361,39 +361,14 @@ pub struct Time {
 }
 #[allow(non_snake_case)]
 #[derive(Serialize)]
-struct ClientHello<'a> {
-    MAC: &'a str,
-    HostName: &'a str,
-    Version: &'a str,
-    ClientName: &'a str,
-    OS: &'a str,
-    Arch: &'a str,
-    Instance: u8,
-    ID: &'a str,
-    SnapStreamProtocolVersion: u8,
-}
-
-pub struct Server {
-    mac: String,
-    hostname: String,
-}
-
-impl Server {
-    pub fn new(mac: String, hostname: String) -> Server {
-        Server { mac, hostname }
-    }
-    pub fn hello(&self) -> Vec<u8> {
-        ClientHello {
-            Arch: "x86_64",
-            ClientName: "CoolClient",
-            HostName: &self.hostname,
-            ID: &self.mac,
-            Instance: 1,
-            MAC: &self.mac,
-            SnapStreamProtocolVersion: 2,
-            Version: "0.17.1",
-            OS: "an os",
-        }
-        .as_buf()
-    }
+pub struct ClientHello<'a> {
+    pub MAC: &'a str,
+    pub HostName: &'a str,
+    pub Version: &'a str,
+    pub ClientName: &'a str,
+    pub OS: &'a str,
+    pub Arch: &'a str,
+    pub Instance: u8,
+    pub ID: &'a str,
+    pub SnapStreamProtocolVersion: u8, // this one shouldn't be pub
 }
