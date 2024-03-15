@@ -2,6 +2,7 @@ mod decoder;
 mod playback;
 mod proto;
 
+use clap::Parser;
 use decoder::{Decode, Decoder};
 #[cfg(feature = "alsa")]
 use playback::Alsa;
@@ -11,14 +12,31 @@ use playback::{File, Player, Players, Tcp};
 
 use circular_buffer::CircularBuffer;
 
-use proto::{Base, Server, ServerMessage, Time, TimeVal};
+use proto::{Base, CodecHeader, Server, ServerMessage, Time, TimeVal};
 
 use std::io::prelude::*;
 use std::net::TcpStream;
 use std::sync::{mpsc, Arc, Mutex};
 use std::time;
 
+#[derive(clap::ValueEnum, Debug, Copy, Clone)]
+enum PlayerBackend {
+    #[cfg(feature = "alsa")]
+    Alsa,
+    #[cfg(feature = "pulse")]
+    Pulse,
+    TCP,
+    File,
+}
+
+#[derive(Parser, Debug)]
+struct Args {
+    #[arg(short, long, value_enum)]
+    backend: PlayerBackend,
+}
+
 fn main() -> anyhow::Result<()> {
+    let args = Args::parse();
     let mut s = TcpStream::connect("192.168.2.131:1704")?;
     s.set_nodelay(true)?;
 
@@ -119,26 +137,8 @@ fn main() -> anyhow::Result<()> {
         match decoded_m {
             ServerMessage::CodecHeader(ch) => {
                 _ = dec_2.lock().unwrap().insert(Decoder::new(&ch)?);
-
-                #[cfg(feature = "alsa")]
-                {
-                    let p: Players = Players::from(Alsa::new(ch.metadata.rate())?);
-                    _ = player_2.lock().unwrap().insert(p);
-                }
-                #[cfg(feature = "pulse")]
-                {
-                    let p: Players = Players::from(Pulse::new(ch.metadata.rate())?);
-                    _ = player_2.lock().unwrap().insert(p);
-                }
-                #[cfg(not(any(feature = "alsa", feature = "pulse")))]
-                {
-                    println!("Compiled without support for pulse/alsa, outputting to TCP");
-                    let p: Players = Players::from(Tcp::new("127.0.0.1:12345")?);
-                    _ = player_2.lock().unwrap().insert(p);
-                    //println!("Compiled without support for pulse/alsa, outputting to out.pcm");
-                    //let p: Players = Players::from(File::new(std::path::Path::new("out.pcm"))?);
-                    //_ = player_2.lock().unwrap().insert(p);
-                }
+                let p = make_player(args.backend, &ch)?;
+                _ = player_2.lock().unwrap().insert(p);
             }
             ServerMessage::WireChunk(wc) => {
                 let t_s = wc.timestamp;
@@ -163,5 +163,16 @@ fn main() -> anyhow::Result<()> {
                 latency_buf.push_back(tbase_adj);
             }
         }
+    }
+}
+
+fn make_player(b: PlayerBackend, ch: &CodecHeader) -> anyhow::Result<Players> {
+    match b {
+        #[cfg(feature = "alsa")]
+        PlayerBackend::Alsa => Ok(Players::from(Alsa::new(ch.metadata.rate())?)),
+        #[cfg(feature = "pulse")]
+        PlayerBackend::Pulse => Ok(Players::from(Pulse::new(ch.metadata.rate())?)),
+        PlayerBackend::TCP => Ok(Players::from(Tcp::new("127.0.0.1:12345")?)),
+        PlayerBackend::File => Ok(Players::from(File::new(std::path::Path::new("out.pcm"))?)),
     }
 }
