@@ -1,7 +1,7 @@
 use crate::playback::Player;
 use std::io::Write;
 
-pub(crate) struct File {
+pub struct File {
     f: std::fs::File,
 }
 impl Player for File {

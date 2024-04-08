@@ -277,11 +277,11 @@ impl<'a> ClientHello<'a> {
 
 #[derive(Debug, Deserialize)]
 #[allow(non_snake_case)]
-pub(crate) struct ServerSettings {
-    pub(crate) bufferMs: u32,
-    pub(crate) latency: u32,
-    pub(crate) muted: bool,
-    pub(crate) volume: u8,
+pub struct ServerSettings {
+    pub bufferMs: u32,
+    pub latency: u32,
+    pub muted: bool,
+    pub volume: u8,
 }
 #[derive(Debug, Copy, Clone)]
 pub struct OpusMetadata {
@@ -304,7 +304,7 @@ impl From<&[u8]> for OpusMetadata {
     }
 }
 #[derive(Debug)]
-pub(crate) struct PcmMetadata<'a> {
+pub struct PcmMetadata<'a> {
     raw_payload: &'a [u8],
     pub(crate) channel_count: u16,
     pub(crate) audio_rate: u32,

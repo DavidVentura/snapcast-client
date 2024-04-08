@@ -76,7 +76,7 @@ impl ConnectedClient {
         // afterwards, a measurement a second should be OK
         // TODO: crash if this buffer is not full; so `lts.as_millis` is >= 0
         // but it should be fixed instead
-        if empty || (filling_buf && lts.as_millis() >= 0) || lts.as_secs() >= 1 {
+        if empty || (filling_buf && lts.as_millis() > 0) || lts.as_secs() >= 1 {
             self.send_time()?;
             self.last_time_sent = Instant::now();
         }

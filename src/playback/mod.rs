@@ -1,23 +1,23 @@
 #[cfg(feature = "alsa")]
 pub mod alsa;
 #[cfg(feature = "alsa")]
-pub(crate) use alsa::Alsa;
+pub use alsa::Alsa;
 
 #[cfg(feature = "pulse")]
-pub(crate) use pulse::Pulse;
+pub use pulse::Pulse;
 #[cfg(feature = "pulse")]
 pub mod pulse;
 
 pub mod file;
-pub(crate) use file::File;
+pub use file::File;
 
 pub mod tcp;
-pub(crate) use tcp::Tcp;
+pub use tcp::Tcp;
 
 use enum_dispatch::enum_dispatch;
 
 #[enum_dispatch]
-pub(crate) trait Player {
+pub trait Player {
     fn play(&self) -> anyhow::Result<()>;
     fn write(&mut self, buf: &[i16]) -> anyhow::Result<()>;
     fn latency_ms(&self) -> anyhow::Result<u16>;

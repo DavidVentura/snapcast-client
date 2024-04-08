@@ -2,7 +2,7 @@ use crate::playback::Player;
 use std::io::Write;
 use std::net::{TcpStream, ToSocketAddrs};
 
-pub(crate) struct Tcp {
+pub struct Tcp {
     s: TcpStream,
 }
 

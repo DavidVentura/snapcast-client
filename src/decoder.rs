@@ -6,7 +6,7 @@ use enum_dispatch::enum_dispatch;
 use opus;
 
 #[enum_dispatch(Decode)]
-pub(crate) enum Decoder {
+pub enum Decoder {
     #[cfg(feature = "opus")]
     Opus(opus::Decoder),
     PCM(NoOpDecoder),
@@ -34,7 +34,7 @@ impl Decoder {
 }
 
 #[enum_dispatch]
-pub(crate) trait Decode {
+pub trait Decode {
     /// Returns total number of samples
     fn decode_sample(&mut self, buf: &[u8], out: &mut [i16]) -> Result<usize, anyhow::Error>;
 }
@@ -47,7 +47,7 @@ impl Decode for opus::Decoder {
     }
 }
 
-pub(crate) struct NoOpDecoder;
+pub struct NoOpDecoder;
 
 impl Decode for NoOpDecoder {
     fn decode_sample(&mut self, buf: &[u8], out: &mut [i16]) -> Result<usize, anyhow::Error> {
