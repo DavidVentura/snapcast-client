@@ -348,6 +348,20 @@ pub enum CodecMetadata<'a> {
 }
 
 impl<'a> CodecMetadata<'a> {
+    pub fn sample_rate(&self) -> usize {
+        match self {
+            CodecMetadata::Opus(o) => o.sample_rate as usize,
+            CodecMetadata::Pcm(p) => p.audio_rate as usize,
+            _ => todo!(),
+        }
+    }
+    pub fn channels(&self) -> usize {
+        match self {
+            CodecMetadata::Opus(o) => o.channel_count as usize,
+            CodecMetadata::Pcm(p) => p.channel_count as usize,
+            _ => todo!(),
+        }
+    }
     pub fn rate(&self) -> usize {
         match self {
             CodecMetadata::Opus(o) => o.sample_rate as usize,
