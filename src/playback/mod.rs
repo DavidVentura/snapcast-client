@@ -18,10 +18,10 @@ use enum_dispatch::enum_dispatch;
 
 #[enum_dispatch]
 pub trait Player {
-    fn play(&self) -> anyhow::Result<()>;
+    fn play(&mut self) -> anyhow::Result<()>;
     fn write(&mut self, buf: &[i16]) -> anyhow::Result<()>;
     fn latency_ms(&self) -> anyhow::Result<u16>;
-    fn set_volume(&self, val: u8) -> anyhow::Result<()>;
+    fn set_volume(&mut self, val: u8) -> anyhow::Result<()>;
 }
 
 #[enum_dispatch(Player)]

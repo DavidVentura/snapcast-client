@@ -29,7 +29,7 @@ impl Pulse {
     }
 }
 impl Player for Pulse {
-    fn play(&self) -> anyhow::Result<()> {
+    fn play(&mut self) -> anyhow::Result<()> {
         Ok(())
     }
     fn write(&mut self, buf: &[i16]) -> anyhow::Result<()> {
@@ -40,7 +40,7 @@ impl Player for Pulse {
     fn latency_ms(&self) -> anyhow::Result<u16> {
         Ok(self.pulse.get_latency()?.as_millis() as u16)
     }
-    fn set_volume(&self, val: u8) -> anyhow::Result<()> {
+    fn set_volume(&mut self, val: u8) -> anyhow::Result<()> {
         //self.pulse.
         Ok(())
     }

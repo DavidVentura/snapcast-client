@@ -5,7 +5,7 @@ pub struct File {
     f: std::fs::File,
 }
 impl Player for File {
-    fn play(&self) -> anyhow::Result<()> {
+    fn play(&mut self) -> anyhow::Result<()> {
         Ok(())
     }
     fn write(&mut self, buf: &[i16]) -> anyhow::Result<()> {
@@ -17,7 +17,7 @@ impl Player for File {
     fn latency_ms(&self) -> anyhow::Result<u16> {
         Ok(0)
     }
-    fn set_volume(&self, _val: u8) -> anyhow::Result<()> {
+    fn set_volume(&mut self, _val: u8) -> anyhow::Result<()> {
         // ?
         Ok(())
     }

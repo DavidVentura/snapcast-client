@@ -7,7 +7,7 @@ pub struct Tcp {
 }
 
 impl Player for Tcp {
-    fn play(&self) -> anyhow::Result<()> {
+    fn play(&mut self) -> anyhow::Result<()> {
         Ok(())
     }
     fn write(&mut self, buf: &[i16]) -> anyhow::Result<()> {
@@ -21,7 +21,7 @@ impl Player for Tcp {
         // ?
         Ok(0)
     }
-    fn set_volume(&self, _val: u8) -> anyhow::Result<()> {
+    fn set_volume(&mut self, _val: u8) -> anyhow::Result<()> {
         // ?
         Ok(())
     }

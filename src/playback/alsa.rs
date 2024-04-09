@@ -48,7 +48,7 @@ impl Alsa {
 }
 
 impl Player for Alsa {
-    fn play(&self) -> anyhow::Result<()> {
+    fn play(&mut self) -> anyhow::Result<()> {
         if self.pcm.state() != State::Running {
             self.pcm.start()?;
         }
@@ -62,7 +62,7 @@ impl Player for Alsa {
     fn latency_ms(&self) -> anyhow::Result<u16> {
         Ok(self.buf_time_ms)
     }
-    fn set_volume(&self, val: u8) -> anyhow::Result<()> {
+    fn set_volume(&mut self, val: u8) -> anyhow::Result<()> {
         Ok(())
     }
 }
