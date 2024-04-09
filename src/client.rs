@@ -11,8 +11,7 @@ pub struct Client {
 
 #[derive(Debug)]
 pub struct ConnectedClient {
-    conn_rx: TcpStream,
-    conn_tx: TcpStream,
+    conn: TcpStream,
     time_zero: Duration,
     time_base: Instant,
     last_time_sent: Instant,
@@ -25,18 +24,19 @@ pub struct ConnectedClient {
 
 impl ConnectedClient {
     fn new(conn: TcpStream) -> anyhow::Result<ConnectedClient> {
-        conn.set_nodelay(true)?;
+        match conn.set_nodelay(true) {
+            Ok(()) => (),
+            Err(e) => println!("Failed to set nodelay on connection: {:?}", e),
+        }
         let time_base = Instant::now();
         let time_zero = time_base.elapsed();
 
-        let conn_tx = conn.try_clone()?;
         let latency_buf = CircularBuffer::new();
         let cap = latency_buf.capacity();
         let tv_zero = TimeVal { sec: 0, usec: 0 };
 
         Ok(ConnectedClient {
-            conn_rx: conn,
-            conn_tx,
+            conn,
             time_base,
             time_zero,
             latency_buf,
@@ -50,7 +50,7 @@ impl ConnectedClient {
 
     fn send_hello(&mut self, h: ClientHello) -> anyhow::Result<()> {
         let b = h.as_buf();
-        self.conn_tx.write_all(&b)?;
+        self.conn.write_all(&b)?;
         Ok(())
     }
 
@@ -62,7 +62,7 @@ impl ConnectedClient {
         };
         let t = Time::as_buf(self.pkt_id as u16, tv, tv, tv);
         self.pkt_id += 1;
-        self.conn_tx.write_all(&t)?;
+        self.conn.write_all(&t)?;
         Ok(())
     }
 
@@ -81,9 +81,9 @@ impl ConnectedClient {
             self.last_time_sent = Instant::now();
         }
 
-        self.conn_rx.read_exact(&mut self.hdr_buf)?;
+        self.conn.read_exact(&mut self.hdr_buf)?;
         let b = Base::from(self.hdr_buf.as_slice());
-        self.conn_rx
+        self.conn
             .read_exact(&mut self.pkt_buf[0..b.size as usize])?;
 
         let decoded_m = b.decode(&self.pkt_buf[0..b.size as usize]);
@@ -123,7 +123,7 @@ impl Client {
         let mut cc = ConnectedClient::new(conn)?;
 
         let hello = ClientHello {
-            Arch: "x86_64",
+            Arch: std::env::consts::ARCH,
             ClientName: "CoolClient",
             HostName: &self.hostname,
             ID: &self.mac,
