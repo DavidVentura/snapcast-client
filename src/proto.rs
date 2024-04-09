@@ -150,6 +150,9 @@ fn slice_to_u16(s: &[u8]) -> u16 {
 fn slice_to_i32(s: &[u8]) -> i32 {
     i32::from_le_bytes([s[0], s[1], s[2], s[3]])
 }
+fn slice_to_u32be(s: &[u8]) -> u32 {
+    u32::from_be_bytes([s[0], s[1], s[2], s[3]])
+}
 fn slice_to_u32(s: &[u8]) -> u32 {
     u32::from_le_bytes([s[0], s[1], s[2], s[3]])
 }
@@ -163,7 +166,7 @@ impl<'a> From<&'a [u8]> for CodecHeader<'a> {
         let payload = &buf[codec_name_end + 4..codec_name_end + 4 + payload_len as usize];
         let metadata = match codec {
             "opus" => CodecMetadata::Opus(OpusMetadata::from(payload)),
-            "flac" => CodecMetadata::Opaque(payload),
+            "flac" => CodecMetadata::Flac(FlacMetadata::from(payload)),
             "pcm" => CodecMetadata::Pcm(PcmMetadata::from(payload)),
             "ogg" => CodecMetadata::Opaque(payload),
             _ => todo!("unsupported codec {}", codec),
@@ -340,25 +343,44 @@ impl<'a> From<&'a [u8]> for PcmMetadata<'a> {
     }
 }
 
+#[derive(Debug, Copy, Clone)]
+pub struct FlacMetadata {
+    pub sample_rate: u32,
+    pub bit_depth: u16,
+    pub channel_count: u16,
+}
+
+impl From<&[u8]> for FlacMetadata {
+    fn from(buf: &[u8]) -> FlacMetadata {
+        let buf = &buf[4..]; // fLaC header
+
+        // https://xiph.org/flac/format.html#def_STREAMINFO
+        let bitfield = slice_to_u32be(&buf[14..18]);
+        let sample_rate = (bitfield & 0xffff000) >> 12;
+        let channel_count = (bitfield & 0x0000_3_00) >> 8;
+        let bit_depth = bitfield & 0b11111;
+        FlacMetadata {
+            sample_rate,
+            bit_depth: bit_depth as u16,
+            channel_count: channel_count as u16,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum CodecMetadata<'a> {
     Opaque(&'a [u8]),
+    Flac(FlacMetadata),
     Pcm(PcmMetadata<'a>),
     Opus(OpusMetadata),
 }
 
 impl<'a> CodecMetadata<'a> {
-    pub fn sample_rate(&self) -> usize {
-        match self {
-            CodecMetadata::Opus(o) => o.sample_rate as usize,
-            CodecMetadata::Pcm(p) => p.audio_rate as usize,
-            _ => todo!(),
-        }
-    }
     pub fn channels(&self) -> usize {
         match self {
             CodecMetadata::Opus(o) => o.channel_count as usize,
             CodecMetadata::Pcm(p) => p.channel_count as usize,
+            CodecMetadata::Flac(f) => f.channel_count as usize,
             _ => todo!(),
         }
     }
@@ -366,6 +388,7 @@ impl<'a> CodecMetadata<'a> {
         match self {
             CodecMetadata::Opus(o) => o.sample_rate as usize,
             CodecMetadata::Pcm(p) => p.audio_rate as usize,
+            CodecMetadata::Flac(f) => f.sample_rate as usize,
             _ => todo!(),
         }
     }

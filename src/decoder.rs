@@ -2,6 +2,9 @@ use crate::proto::{CodecHeader, CodecMetadata};
 use anyhow::Result;
 use enum_dispatch::enum_dispatch;
 
+#[cfg(feature = "flac")]
+use claxon::frame::FrameReader;
+
 #[cfg(feature = "opus")]
 use opus;
 
@@ -10,6 +13,8 @@ pub enum Decoder {
     #[cfg(feature = "opus")]
     Opus(opus::Decoder),
     PCM(NoOpDecoder),
+    #[cfg(feature = "flac")]
+    Flac(FlacDecoder),
 }
 
 impl Decoder {
@@ -27,6 +32,11 @@ impl Decoder {
                     return Ok(Decoder::Opus(opus::Decoder::new(config.sample_rate, c)?));
                 }
                 anyhow::bail!("Opus disabled at build time");
+            }
+            CodecMetadata::Flac(buf) => {
+                #[cfg(feature = "flac")]
+                return Ok(Decoder::Flac(FlacDecoder::new()));
+                anyhow::bail!("Flac disabled at build time");
             }
             _ => anyhow::bail!("Don't know how to handle {:?}", ch.metadata),
         }
@@ -56,5 +66,28 @@ impl Decode for NoOpDecoder {
         out[0..converted.len()].copy_from_slice(converted);
 
         Ok(converted.len())
+    }
+}
+
+pub struct FlacDecoder {}
+impl FlacDecoder {
+    pub fn new() -> FlacDecoder {
+        FlacDecoder {}
+    }
+}
+
+#[cfg(feature = "flac")]
+impl Decode for FlacDecoder {
+    fn decode_sample(&mut self, buf: &[u8], out: &mut [i16]) -> Result<usize, anyhow::Error> {
+        let mut fr = FrameReader::new(std::io::Cursor::new(buf));
+        let v = Vec::new();
+        let block = fr.read_next_or_eof(v).unwrap().unwrap();
+        let mut c = 0;
+        for (i, (a, b)) in block.stereo_samples().enumerate() {
+            out[i * 2 + 0] = (a / 2) as i16;
+            out[i * 2 + 1] = (b / 2) as i16;
+            c = i;
+        }
+        Ok(c * 2)
     }
 }
