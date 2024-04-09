@@ -11,6 +11,12 @@ pub struct TimeVal {
 }
 
 impl TimeVal {
+    pub fn abs(&self) -> TimeVal {
+        TimeVal {
+            sec: self.sec.abs(),
+            usec: self.usec.abs(),
+        }
+    }
     fn normalize(mut self) -> Self {
         while self.usec > 1_000_000 {
             self.usec -= 1_000_000;
@@ -71,8 +77,13 @@ impl Add<TimeVal> for TimeVal {
 impl Sub<TimeVal> for TimeVal {
     type Output = TimeVal;
     fn sub(self, other: TimeVal) -> TimeVal {
-        let sec = self.sec - other.sec;
-        let usec = self.usec - other.usec;
+        let mut sec = self.sec - other.sec;
+        let mut usec = self.usec - other.usec;
+
+        if sec == -1 && usec > 0 {
+            sec = 0;
+            usec = 1_000_000 - usec;
+        }
         TimeVal { sec, usec }.normalize()
     }
 }
