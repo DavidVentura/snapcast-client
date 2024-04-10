@@ -40,8 +40,8 @@ impl Player for Pulse {
     fn latency_ms(&self) -> anyhow::Result<u16> {
         Ok(self.pulse.get_latency()?.as_millis() as u16)
     }
-    fn set_volume(&mut self, val: u8) -> anyhow::Result<()> {
-        //self.pulse.
+    fn set_volume(&mut self, _val: u8) -> anyhow::Result<()> {
+        println!("setting volume is not implemented in pulse backend");
         Ok(())
     }
 }

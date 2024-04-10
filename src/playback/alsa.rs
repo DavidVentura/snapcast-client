@@ -62,7 +62,8 @@ impl Player for Alsa {
     fn latency_ms(&self) -> anyhow::Result<u16> {
         Ok(self.buf_time_ms)
     }
-    fn set_volume(&mut self, val: u8) -> anyhow::Result<()> {
+    fn set_volume(&mut self, _val: u8) -> anyhow::Result<()> {
+        println!("setting volume is not implemented in alsa backend");
         Ok(())
     }
 }
