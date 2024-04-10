@@ -2,7 +2,9 @@ Implementation of the client-side of the [Snapcast](https://github.com/badaix/sn
 
 The player works as a proof of concept, though it sometimes crashes when using the ALSA backend and adjusting the latency.
 
-Only PCM/Opus are implemented, and only File/Pulse/Alsa/Tcp work for output devices.
+Only PCM/Flac/Opus are implemented, and only File/Pulse/Alsa/Tcp work for output devices.
+
+The Flac codec has slight clipping and I don't know why.
 
 
 To use the `TCP` module, (or to avoid having to link to `libpulse`), you can enable the 'simple protocol' module:
