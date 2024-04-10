@@ -6,6 +6,7 @@ use super::Player;
 pub struct Alsa {
     pcm: PCM,
     buf_time_ms: u16,
+    sample_rate: u16,
 }
 
 impl Alsa {
@@ -43,6 +44,7 @@ impl Alsa {
         Ok(Alsa {
             pcm,
             buf_time_ms: (buf_time_us / 1000) as u16,
+            sample_rate: rate as u16,
         })
     }
 }
@@ -65,5 +67,8 @@ impl Player for Alsa {
     fn set_volume(&mut self, _val: u8) -> anyhow::Result<()> {
         println!("setting volume is not implemented in alsa backend");
         Ok(())
+    }
+    fn sample_rate(&self) -> u16 {
+        self.sample_rate
     }
 }

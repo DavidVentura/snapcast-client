@@ -5,6 +5,7 @@ use libpulse_simple_binding::Simple;
 
 pub struct Pulse {
     pulse: Simple,
+    sample_rate: u16,
 }
 
 impl Pulse {
@@ -25,7 +26,10 @@ impl Pulse {
             None,                // Use default buffering attributes
         )?;
 
-        Ok(Pulse { pulse })
+        Ok(Pulse {
+            pulse,
+            sample_rate: rate as u16,
+        })
     }
 }
 impl Player for Pulse {
@@ -43,5 +47,8 @@ impl Player for Pulse {
     fn set_volume(&mut self, _val: u8) -> anyhow::Result<()> {
         println!("setting volume is not implemented in pulse backend");
         Ok(())
+    }
+    fn sample_rate(&self) -> u16 {
+        self.sample_rate
     }
 }

@@ -4,6 +4,7 @@ use std::net::{TcpStream, ToSocketAddrs};
 
 pub struct Tcp {
     s: TcpStream,
+    sample_rate: u16,
 }
 
 impl Player for Tcp {
@@ -25,11 +26,17 @@ impl Player for Tcp {
         // ?
         Ok(())
     }
+    fn sample_rate(&self) -> u16 {
+        self.sample_rate
+    }
 }
 
 impl Tcp {
-    pub fn new<A: ToSocketAddrs>(addr: A) -> anyhow::Result<Tcp> {
+    pub fn new<A: ToSocketAddrs>(addr: A, rate: usize) -> anyhow::Result<Tcp> {
         let s = TcpStream::connect(addr)?;
-        Ok(Tcp { s })
+        Ok(Tcp {
+            s,
+            sample_rate: rate as u16,
+        })
     }
 }

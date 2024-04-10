@@ -3,6 +3,7 @@ use std::io::Write;
 
 pub struct File {
     f: std::fs::File,
+    sample_rate: u16,
 }
 impl Player for File {
     fn play(&mut self) -> anyhow::Result<()> {
@@ -21,12 +22,16 @@ impl Player for File {
         // ?
         Ok(())
     }
+    fn sample_rate(&self) -> u16 {
+        self.sample_rate
+    }
 }
 
 impl File {
-    pub fn new(p: &std::path::Path) -> anyhow::Result<File> {
+    pub fn new(p: &std::path::Path, rate: usize) -> anyhow::Result<File> {
         Ok(File {
             f: std::fs::File::create(p)?,
+            sample_rate: rate as u16,
         })
     }
 }

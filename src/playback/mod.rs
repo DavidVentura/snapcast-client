@@ -22,6 +22,7 @@ pub trait Player {
     fn write(&mut self, buf: &mut [i16]) -> anyhow::Result<()>;
     fn latency_ms(&self) -> anyhow::Result<u16>;
     fn set_volume(&mut self, val: u8) -> anyhow::Result<()>;
+    fn sample_rate(&self) -> u16;
 }
 
 #[enum_dispatch(Player)]
