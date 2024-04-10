@@ -8,7 +8,7 @@ impl Player for File {
     fn play(&mut self) -> anyhow::Result<()> {
         Ok(())
     }
-    fn write(&mut self, buf: &[i16]) -> anyhow::Result<()> {
+    fn write(&mut self, buf: &mut [i16]) -> anyhow::Result<()> {
         // SAFETY: it's always safe to align i16 to u8
         let (_, converted, _) = unsafe { buf.align_to::<u8>() };
         self.f.write_all(converted)?;

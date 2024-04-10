@@ -54,7 +54,7 @@ impl Player for Alsa {
         }
         Ok(())
     }
-    fn write(&mut self, buf: &[i16]) -> anyhow::Result<()> {
+    fn write(&mut self, buf: &mut [i16]) -> anyhow::Result<()> {
         let io = self.pcm.io_i16()?;
         io.writei(buf)?;
         Ok(())

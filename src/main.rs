@@ -123,9 +123,9 @@ fn handle_samples(
         // Backends with 0ms of buffer (file, tcp) otherwise behave erratically
         player_lat_ms = std::cmp::max(1, p.latency_ms().unwrap());
         let decoded_sample_c = dec.decode_sample(&samples, &mut samples_out).unwrap();
-        let sample = &samples_out[0..decoded_sample_c];
+        let mut sample = &mut samples_out[0..decoded_sample_c];
         p.play().unwrap();
-        p.write(sample).unwrap();
+        p.write(&mut sample).unwrap();
     }
 }
 
