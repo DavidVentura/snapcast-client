@@ -21,6 +21,8 @@ impl Decoder {
     pub fn new(ch: &CodecHeader) -> anyhow::Result<Decoder> {
         match &ch.metadata {
             CodecMetadata::Pcm(_) => Ok(Decoder::PCM(NoOpDecoder {})),
+
+            #[allow(unused_variables)]
             CodecMetadata::Opus(config) => {
                 #[cfg(feature = "opus")]
                 {
@@ -33,7 +35,7 @@ impl Decoder {
                 }
                 anyhow::bail!("Opus disabled at build time");
             }
-            CodecMetadata::Flac(buf) => {
+            CodecMetadata::Flac(_buf) => {
                 #[cfg(feature = "flac")]
                 return Ok(Decoder::Flac(FlacDecoder::new()));
                 anyhow::bail!("Flac disabled at build time");
@@ -85,7 +87,6 @@ impl Decode for FlacDecoder {
         loop {
             if let Ok(Some(block)) = fr.read_next_or_eof(v) {
                 for (a, b) in block.stereo_samples() {
-                    // not sure why claxon passes samples as i32s
                     debug_assert!(a <= i16::MAX as i32);
                     debug_assert!(a >= i16::MIN as i32);
                     debug_assert!(b <= i16::MAX as i32);
