@@ -80,14 +80,25 @@ impl FlacDecoder {
 impl Decode for FlacDecoder {
     fn decode_sample(&mut self, buf: &[u8], out: &mut [i16]) -> Result<usize, anyhow::Error> {
         let mut fr = FrameReader::new(std::io::Cursor::new(buf));
-        let v = Vec::new();
-        let block = fr.read_next_or_eof(v).unwrap().unwrap();
+        let mut v = Vec::new();
         let mut c = 0;
-        for (i, (a, b)) in block.stereo_samples().enumerate() {
-            out[i * 2 + 0] = (a / 2) as i16;
-            out[i * 2 + 1] = (b / 2) as i16;
-            c = i;
+        loop {
+            if let Ok(Some(block)) = fr.read_next_or_eof(v) {
+                for (a, b) in block.stereo_samples() {
+                    // not sure why claxon passes samples as i32s
+                    debug_assert!(a <= i16::MAX as i32);
+                    debug_assert!(a >= i16::MIN as i32);
+                    debug_assert!(b <= i16::MAX as i32);
+                    debug_assert!(b >= i16::MIN as i32);
+                    out[c + 0] = a as i16;
+                    out[c + 1] = b as i16;
+                    c += 2;
+                }
+                v = block.into_buffer();
+            } else {
+                break;
+            }
         }
-        Ok(c * 2)
+        Ok(c)
     }
 }
