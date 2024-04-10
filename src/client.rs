@@ -74,8 +74,6 @@ impl ConnectedClient {
 
         // Want to fill the initial latency buffer fairly quickly (100ms between iters)
         // afterwards, a measurement a second should be OK
-        // TODO: crash if this buffer is not full; so `lts.as_millis` is >= 0
-        // but it should be fixed instead
         if empty || (filling_buf && lts.as_millis() > 0) || lts.as_secs() >= 1 {
             self.send_time()?;
             self.last_time_sent = Instant::now();
@@ -97,7 +95,7 @@ impl ConnectedClient {
         }
     }
 
-    /// Median latency out of the last 50 measurements
+    /// Median latency out of the last measurements
     pub fn latency_to_server(&mut self) -> TimeVal {
         if self.latency_buf.len() == 0 {
             return TimeVal {
@@ -105,11 +103,15 @@ impl ConnectedClient {
                 usec: 1_000,
             };
         }
+
         for (i, tv) in self.latency_buf.iter().enumerate() {
             self.sorted_latency_buf[i] = *tv;
         }
+
+        let slb_len = self.sorted_latency_buf.len();
         self.sorted_latency_buf.sort();
-        self.sorted_latency_buf[self.sorted_latency_buf.len() / 2]
+        let nz_samples = &self.sorted_latency_buf[slb_len - self.latency_buf.len()..];
+        nz_samples[nz_samples.len() / 2]
     }
 
     pub fn time_base(&self) -> Instant {
