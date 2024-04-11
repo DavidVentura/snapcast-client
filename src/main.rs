@@ -135,7 +135,13 @@ fn make_player(b: PlayerBackend, ch: &CodecHeader) -> anyhow::Result<Players> {
         PlayerBackend::Alsa => Ok(Players::from(Alsa::new(ch.metadata.rate())?)),
         #[cfg(feature = "pulse")]
         PlayerBackend::Pulse => Ok(Players::from(Pulse::new(ch.metadata.rate())?)),
-        PlayerBackend::TCP => Ok(Players::from(Tcp::new("127.0.0.1:12345")?)),
-        PlayerBackend::File => Ok(Players::from(File::new(std::path::Path::new("out.pcm"))?)),
+        PlayerBackend::TCP => Ok(Players::from(Tcp::new(
+            "127.0.0.1:12345",
+            ch.metadata.rate(),
+        )?)),
+        PlayerBackend::File => Ok(Players::from(File::new(
+            std::path::Path::new("out.pcm"),
+            ch.metadata.rate(),
+        )?)),
     }
 }
