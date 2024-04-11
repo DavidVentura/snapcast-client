@@ -12,9 +12,19 @@ pub struct TimeVal {
 
 impl TimeVal {
     pub fn abs(&self) -> TimeVal {
+        if self.sec == -1 {
+            return TimeVal {
+                sec: 0,
+                usec: self.usec - 1_000_000,
+            };
+        }
         TimeVal {
             sec: self.sec.abs(),
-            usec: self.usec.abs(),
+            usec: if self.usec > 0 {
+                1_000_000 - self.usec
+            } else {
+                self.usec.abs()
+            },
         }
     }
     fn normalize(mut self) -> Self {
@@ -26,7 +36,6 @@ impl TimeVal {
             self.usec += 1_000_000;
             self.sec -= 1;
         }
-
         self
     }
     pub fn from_millis(millis: i32) -> TimeVal {
@@ -80,10 +89,6 @@ impl Sub<TimeVal> for TimeVal {
         let mut sec = self.sec - other.sec;
         let mut usec = self.usec - other.usec;
 
-        if sec == -1 && usec > 0 {
-            sec = 0;
-            usec = 1_000_000 - usec;
-        }
         TimeVal { sec, usec }.normalize()
     }
 }
@@ -418,4 +423,18 @@ pub struct ClientHello<'a> {
     pub Instance: u8,
     pub ID: &'a str,
     pub SnapStreamProtocolVersion: u8, // this one shouldn't be pub
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sub_timeval() {
+        let tv1 = TimeVal { sec: 0, usec: 10 };
+        let tv2 = TimeVal { sec: 0, usec: 11 };
+        let expected = TimeVal { sec: 0, usec: -1 };
+
+        assert_eq!(tv1 - tv2, expected);
+    }
 }
