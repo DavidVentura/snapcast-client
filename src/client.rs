@@ -26,7 +26,7 @@ impl ConnectedClient {
     fn new(conn: TcpStream) -> anyhow::Result<ConnectedClient> {
         match conn.set_nodelay(true) {
             Ok(()) => (),
-            Err(e) => println!("Failed to set nodelay on connection: {:?}", e),
+            Err(e) => log::error!("Failed to set nodelay on connection: {:?}", e),
         }
         let time_base = Instant::now();
         let time_zero = time_base.elapsed();
@@ -41,13 +41,16 @@ impl ConnectedClient {
             time_zero,
             latency_buf,
             hdr_buf: vec![0; Base::BASE_SIZE],
-            pkt_buf: vec![0; 6000], // pcm data is up to 4880b i think
+            pkt_buf: vec![0; 9000], // pcm data is up to 4880b; localhost mtu gets up to 9k
             sorted_latency_buf: vec![tv_zero; cap],
             pkt_id: 0,
             last_time_sent: Instant::now(),
         })
     }
 
+    pub fn synchronized(&self) -> bool {
+        self.latency_buf.len() == self.sorted_latency_buf.len()
+    }
     fn send_hello(&mut self, h: ClientHello) -> anyhow::Result<()> {
         let b = h.as_buf();
         self.conn.write_all(&b)?;
