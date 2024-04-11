@@ -318,15 +318,14 @@ impl From<&[u8]> for OpusMetadata {
     }
 }
 #[derive(Debug)]
-pub struct PcmMetadata<'a> {
-    raw_payload: &'a [u8],
+pub struct PcmMetadata {
     pub(crate) channel_count: u16,
     pub(crate) audio_rate: u32,
-    pub(crate) bit_depth: u16,
+    pub(crate) _bit_depth: u16,
 }
 
-impl<'a> From<&'a [u8]> for PcmMetadata<'a> {
-    fn from(buf: &'a [u8]) -> PcmMetadata<'a> {
+impl From<&[u8]> for PcmMetadata {
+    fn from(buf: &[u8]) -> PcmMetadata {
         assert_eq!(buf[0..4], [b'R', b'I', b'F', b'F']);
         // +16 = remaining header len
         let format_tag = slice_to_u16(&buf[20..22]);
@@ -335,9 +334,8 @@ impl<'a> From<&'a [u8]> for PcmMetadata<'a> {
         let audio_rate = slice_to_u32(&buf[24..28]);
         let bit_depth = slice_to_u16(&buf[34..36]);
         PcmMetadata {
-            raw_payload: buf,
             channel_count,
-            bit_depth,
+            _bit_depth: bit_depth,
             audio_rate,
         }
     }
@@ -371,7 +369,7 @@ impl From<&[u8]> for FlacMetadata {
 pub enum CodecMetadata<'a> {
     Opaque(&'a [u8]),
     Flac(FlacMetadata),
-    Pcm(PcmMetadata<'a>),
+    Pcm(PcmMetadata),
     Opus(OpusMetadata),
 }
 
