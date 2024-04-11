@@ -3,13 +3,13 @@ mod decoder;
 mod playback;
 mod proto;
 
-use client::Client;
+use client::{Client, Message};
 #[cfg(feature = "alsa")]
 use playback::Alsa;
 #[cfg(feature = "pulse")]
 use playback::Pulse;
 use playback::{File, Player, Players, Tcp};
-use proto::{CodecHeader, ServerMessage, TimeVal};
+use proto::{CodecHeader, TimeVal};
 
 use clap::Parser;
 use decoder::{Decode, Decoder};
@@ -46,35 +46,22 @@ fn main() -> anyhow::Result<()> {
     let player: Arc<Mutex<Option<Players>>> = Arc::new(Mutex::new(None));
     let player_2 = player.clone();
 
-    let mut buffer_ms = TimeVal {
-        sec: 0,
-        usec: 999_999,
-    };
-    let mut local_latency = TimeVal { sec: 0, usec: 0 };
-
     let (sample_tx, sample_rx) = mpsc::channel::<(TimeVal, Vec<u8>)>();
     std::thread::spawn(move || handle_samples(sample_rx, time_base_c, player, dec));
 
     loop {
-        let median_tbase = client.latency_to_server();
         let msg = client.tick()?;
         match msg {
-            ServerMessage::CodecHeader(ch) => {
+            Message::CodecHeader(ch) => {
                 _ = dec_2.lock().unwrap().insert(Decoder::new(&ch)?);
                 let p = make_player(args.backend, &ch)?;
                 _ = player_2.lock().unwrap().insert(p);
             }
-            ServerMessage::WireChunk(wc) => {
-                let t_s = wc.timestamp;
-                let t_c = t_s - median_tbase;
-                let audible_at = t_c + buffer_ms - local_latency;
+            Message::WireChunk(wc, audible_at) => {
                 sample_tx.send((audible_at, wc.payload.to_vec()))?;
             }
 
-            ServerMessage::ServerSettings(s) => {
-                buffer_ms = TimeVal::from_millis(s.bufferMs as i32);
-                local_latency = TimeVal::from_millis(s.latency as i32);
-                println!("local lat now {local_latency:?}");
+            Message::PlaybackVolume(_v) => {
                 // TODO volume
             }
             _ => (),

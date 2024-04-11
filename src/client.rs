@@ -1,4 +1,4 @@
-use crate::proto::{Base, ClientHello, ServerMessage, Time, TimeVal};
+use crate::proto::{Base, ClientHello, CodecHeader, ServerMessage, Time, TimeVal, WireChunk};
 use circular_buffer::CircularBuffer;
 use std::io::prelude::*;
 use std::net::{TcpStream, ToSocketAddrs};
@@ -7,6 +7,13 @@ use std::time::{Duration, Instant};
 pub struct Client {
     mac: String,
     hostname: String,
+}
+
+pub enum Message<'a> {
+    Nothing,
+    WireChunk(WireChunk<'a>, TimeVal),
+    PlaybackVolume(u8),
+    CodecHeader(CodecHeader<'a>),
 }
 
 #[derive(Debug)]
@@ -20,6 +27,8 @@ pub struct ConnectedClient {
     hdr_buf: Vec<u8>,
     pkt_buf: Vec<u8>,
     pkt_id: u16,
+    server_buffer_ms: TimeVal,
+    local_latency: TimeVal,
 }
 
 impl ConnectedClient {
@@ -45,6 +54,11 @@ impl ConnectedClient {
             sorted_latency_buf: vec![tv_zero; cap],
             pkt_id: 0,
             last_time_sent: Instant::now(),
+            server_buffer_ms: TimeVal {
+                sec: 0,
+                usec: 999_999,
+            },
+            local_latency: TimeVal { sec: 0, usec: 0 },
         })
     }
 
@@ -69,11 +83,11 @@ impl ConnectedClient {
         Ok(())
     }
 
-    // TODO: should be a narrower type, filter time out?
-    pub fn tick(&mut self) -> anyhow::Result<ServerMessage> {
+    pub fn tick(&mut self) -> anyhow::Result<Message> {
         let lts = self.last_time_sent.elapsed();
         let filling_buf = self.latency_buf.len() < self.latency_buf.capacity();
         let empty = self.latency_buf.len() == 0;
+        let median_tbase = self.latency_to_server();
 
         // Want to fill the initial latency buffer fairly quickly (100ms between iters)
         // afterwards, a measurement a second should be OK
@@ -92,9 +106,26 @@ impl ConnectedClient {
             ServerMessage::Time(t) => {
                 let tbase_adj = t.latency - self.time_zero.into();
                 self.latency_buf.push_back(tbase_adj);
-                Ok(ServerMessage::Nothing)
+                Ok(Message::Nothing)
             }
-            any => Ok(any),
+            ServerMessage::WireChunk(wc) => {
+                let t_s = wc.timestamp;
+                let t_c = t_s - median_tbase;
+                let audible_at = t_c + self.server_buffer_ms - self.local_latency;
+                Ok(Message::WireChunk(wc, audible_at))
+            }
+            ServerMessage::ServerSettings(ref s) => {
+                self.server_buffer_ms = TimeVal::from_millis(s.bufferMs as i32);
+                self.local_latency = TimeVal::from_millis(s.latency as i32);
+                log::info!(
+                    "local lat now {:?}, vol at {}",
+                    self.local_latency,
+                    s.volume
+                );
+                Ok(Message::PlaybackVolume(s.volume))
+            }
+            ServerMessage::Nothing => Ok(Message::Nothing),
+            ServerMessage::CodecHeader(ch) => Ok(Message::CodecHeader(ch)),
         }
     }
 
