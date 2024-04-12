@@ -121,7 +121,6 @@ pub enum ServerMessage<'a> {
     CodecHeader(CodecHeader<'a>),
     WireChunk(WireChunk<'a>),
     Time(Time),
-    Nothing,
 }
 
 impl From<u16> for MessageType {
@@ -470,6 +469,10 @@ mod tests {
             102, 97, 108, 115, 101, 44, 34, 118, 111, 108, 117, 109, 101, 34, 58, 49, 48, 48, 125,
         ];
         assert_eq!(ServerSettings::from(buf.as_slice()), expected);
+        let str_ = r#"{"x":7,"bufferMs":500,"latency":0,"muted":false,"volume":100}"#;
+        let len_buf = u32::to_le_bytes(str_.len() as u32);
+        let buf2 = [&len_buf, str_.as_bytes()].concat();
+        assert_eq!(ServerSettings::from(buf2.as_slice()), expected);
     }
 
     #[test]
