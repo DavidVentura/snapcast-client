@@ -71,10 +71,14 @@ impl Decode for NoOpDecoder {
     }
 }
 
-pub struct FlacDecoder {}
+pub struct FlacDecoder {
+    dec_buf: Vec<i32>,
+}
 impl FlacDecoder {
     pub fn new() -> FlacDecoder {
-        FlacDecoder {}
+        FlacDecoder {
+            dec_buf: Vec::with_capacity(2048),
+        }
     }
 }
 
@@ -82,10 +86,9 @@ impl FlacDecoder {
 impl Decode for FlacDecoder {
     fn decode_sample(&mut self, buf: &[u8], out: &mut [i16]) -> Result<usize, anyhow::Error> {
         let mut fr = FrameReader::new(std::io::Cursor::new(buf));
-        let mut v = Vec::new();
         let mut c = 0;
         loop {
-            if let Ok(Some(block)) = fr.read_next_or_eof(v) {
+            if let Ok(Some(block)) = fr.read_next_or_eof(&mut self.dec_buf) {
                 for (a, b) in block.stereo_samples() {
                     debug_assert!(a <= i16::MAX as i32);
                     debug_assert!(a >= i16::MIN as i32);
@@ -95,7 +98,6 @@ impl Decode for FlacDecoder {
                     out[c + 1] = b as i16;
                     c += 2;
                 }
-                v = block.into_buffer();
             } else {
                 break;
             }
