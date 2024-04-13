@@ -172,7 +172,6 @@ impl<'a> From<&'a [u8]> for CodecHeader<'a> {
             "opus" => CodecMetadata::Opus(OpusMetadata::from(payload)),
             "flac" => CodecMetadata::Flac(FlacMetadata::from(payload)),
             "pcm" => CodecMetadata::Pcm(PcmMetadata::from(payload)),
-            "ogg" => CodecMetadata::Opaque(payload),
             _ => todo!("unsupported codec {}", codec),
         };
         CodecHeader { codec, metadata }
@@ -321,7 +320,7 @@ impl From<&[u8]> for OpusMetadata {
         }
     }
 }
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct PcmMetadata {
     pub(crate) channel_count: u16,
     pub(crate) audio_rate: u32,
@@ -369,21 +368,19 @@ impl From<&[u8]> for FlacMetadata {
     }
 }
 
-#[derive(Debug, PartialEq)]
-pub enum CodecMetadata<'a> {
-    Opaque(&'a [u8]),
+#[derive(Debug, PartialEq, Clone)]
+pub enum CodecMetadata {
     Flac(FlacMetadata),
     Pcm(PcmMetadata),
     Opus(OpusMetadata),
 }
 
-impl<'a> CodecMetadata<'a> {
+impl CodecMetadata {
     pub fn channels(&self) -> usize {
         match self {
             CodecMetadata::Opus(o) => o.channel_count as usize,
             CodecMetadata::Pcm(p) => p.channel_count as usize,
             CodecMetadata::Flac(f) => f.channel_count as usize,
-            _ => todo!(),
         }
     }
     pub fn rate(&self) -> usize {
@@ -391,14 +388,13 @@ impl<'a> CodecMetadata<'a> {
             CodecMetadata::Opus(o) => o.sample_rate as usize,
             CodecMetadata::Pcm(p) => p.audio_rate as usize,
             CodecMetadata::Flac(f) => f.sample_rate as usize,
-            _ => todo!(),
         }
     }
 }
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct CodecHeader<'a> {
     pub codec: &'a str,
-    pub metadata: CodecMetadata<'a>,
+    pub metadata: CodecMetadata,
 }
 
 #[derive(Debug, PartialEq)]
