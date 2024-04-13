@@ -167,7 +167,7 @@ impl Client {
             MAC: &self.mac,
             SnapStreamProtocolVersion: 2,
             Version: "0.17.1",
-            OS: "an os",
+            OS: std::env::consts::OS,
         };
         cc.send_hello(hello)?;
         Ok(cc)
