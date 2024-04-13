@@ -83,18 +83,22 @@ impl ConnectedClient {
         Ok(())
     }
 
-    pub fn tick(&mut self) -> anyhow::Result<Message> {
+    fn fill_latency_buf(&mut self) -> anyhow::Result<()> {
         let lts = self.last_time_sent.elapsed();
         let filling_buf = self.latency_buf.len() < self.latency_buf.capacity();
         let empty = self.latency_buf.len() == 0;
-        let median_tbase = self.latency_to_server();
 
-        // Want to fill the initial latency buffer fairly quickly (100ms between iters)
+        // Want to fill the initial latency buffer fairly quickly (1ms between iters)
         // afterwards, a measurement a second should be OK
         if empty || (filling_buf && lts.as_millis() > 0) || lts.as_secs() >= 1 {
             self.send_time()?;
             self.last_time_sent = Instant::now();
         }
+        Ok(())
+    }
+
+    pub fn tick(&mut self) -> anyhow::Result<Message> {
+        self.fill_latency_buf()?;
 
         self.conn.read_exact(&mut self.hdr_buf)?;
         let b = Base::from(self.hdr_buf.as_slice());
@@ -104,8 +108,13 @@ impl ConnectedClient {
         let decoded_m = b.decode(&self.pkt_buf[0..b.size as usize]);
         match decoded_m {
             ServerMessage::Time(t) => {
-                let tbase_adj = t.latency - self.time_zero.into();
-                self.latency_buf.push_back(tbase_adj);
+                self.latency_buf.push_back(t.latency);
+                // t.latency may go down
+                for (i, tv) in self.latency_buf.iter().enumerate() {
+                    self.sorted_latency_buf[i] = *tv;
+                }
+
+                self.sorted_latency_buf.sort();
                 Ok(Message::Nothing)
             }
             ServerMessage::WireChunk(wc) => {
@@ -117,20 +126,14 @@ impl ConnectedClient {
             ServerMessage::ServerSettings(ref s) => {
                 self.server_buffer_ms = TimeVal::from_millis(s.bufferMs as i32);
                 self.local_latency = TimeVal::from_millis(s.latency as i32);
-                log::info!(
-                    "local lat now {:?}, vol at {}",
-                    self.local_latency,
-                    s.volume
-                );
                 Ok(Message::PlaybackVolume(s.volume))
             }
-            ServerMessage::Nothing => Ok(Message::Nothing),
             ServerMessage::CodecHeader(ch) => Ok(Message::CodecHeader(ch)),
         }
     }
 
     /// Median latency out of the last measurements
-    pub fn latency_to_server(&mut self) -> TimeVal {
+    pub fn latency_to_server(&self) -> TimeVal {
         if self.latency_buf.len() == 0 {
             return TimeVal {
                 sec: 0,
@@ -138,12 +141,7 @@ impl ConnectedClient {
             };
         }
 
-        for (i, tv) in self.latency_buf.iter().enumerate() {
-            self.sorted_latency_buf[i] = *tv;
-        }
-
         let slb_len = self.sorted_latency_buf.len();
-        self.sorted_latency_buf.sort();
         let nz_samples = &self.sorted_latency_buf[slb_len - self.latency_buf.len()..];
         nz_samples[nz_samples.len() / 2]
     }
