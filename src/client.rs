@@ -59,6 +59,10 @@ impl ConnectedClient {
                 usec: 999_999,
             },
             local_latency: TimeVal { sec: 0, usec: 0 },
+            latency: TimeVal {
+                sec: 0,
+                usec: 1_000,
+            },
         })
     }
 
@@ -115,6 +119,9 @@ impl ConnectedClient {
                 }
 
                 self.sorted_latency_buf.sort();
+                let slb_len = self.sorted_latency_buf.len();
+                let nz_samples = &self.sorted_latency_buf[slb_len - self.latency_buf.len()..];
+                self.latency = nz_samples[nz_samples.len() / 2];
                 Ok(Message::Nothing)
             }
             ServerMessage::WireChunk(wc) => {
@@ -134,16 +141,7 @@ impl ConnectedClient {
 
     /// Median latency out of the last measurements
     pub fn latency_to_server(&self) -> TimeVal {
-        if self.latency_buf.len() == 0 {
-            return TimeVal {
-                sec: 0,
-                usec: 1_000,
-            };
-        }
-
-        let slb_len = self.sorted_latency_buf.len();
-        let nz_samples = &self.sorted_latency_buf[slb_len - self.latency_buf.len()..];
-        nz_samples[nz_samples.len() / 2]
+        self.latency
     }
 
     pub fn time_base(&self) -> Instant {
