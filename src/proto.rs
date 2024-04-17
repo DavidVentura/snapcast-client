@@ -1,4 +1,4 @@
-use std::ops::{Add, Sub};
+use std::ops::{Add, Div, Sub};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -27,7 +27,7 @@ impl TimeVal {
             },
         }
     }
-    fn normalize(mut self) -> Self {
+    pub fn normalize(mut self) -> Self {
         while self.usec > 1_000_000 {
             self.usec -= 1_000_000;
             self.sec += 1;
@@ -90,6 +90,15 @@ impl Sub<TimeVal> for TimeVal {
         let usec = self.usec - other.usec;
 
         TimeVal { sec, usec }.normalize()
+    }
+}
+impl Div<i32> for TimeVal {
+    type Output = TimeVal;
+    fn div(self, other: i32) -> TimeVal {
+        TimeVal {
+            sec: self.sec / other,
+            usec: self.usec / other,
+        }
     }
 }
 
