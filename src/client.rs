@@ -29,6 +29,7 @@ pub struct ConnectedClient {
     pkt_id: u16,
     server_buffer_ms: TimeVal,
     local_latency: TimeVal,
+    last_sent_time: TimeVal,
 }
 
 impl ConnectedClient {
@@ -59,6 +60,7 @@ impl ConnectedClient {
                 usec: 999_999,
             },
             local_latency: TimeVal { sec: 0, usec: 0 },
+            last_sent_time: TimeVal { sec: 0, usec: 0 },
             latency: TimeVal {
                 sec: 0,
                 usec: 1_000,
@@ -81,6 +83,7 @@ impl ConnectedClient {
             sec: now.as_secs() as i32, // allows for 68 years of uptime
             usec: now.subsec_micros() as i32,
         };
+        self.last_sent_time = tv;
         let t = Time::as_buf(self.pkt_id as u16, tv, tv, tv);
         self.pkt_id += 1;
         self.conn.write_all(&t)?;
@@ -108,12 +111,18 @@ impl ConnectedClient {
         let b = Base::from(self.hdr_buf.as_slice());
         self.conn
             .read_exact(&mut self.pkt_buf[0..b.size as usize])?;
+        let recv_ts = TimeVal::from(self.time_base.elapsed());
 
         let decoded_m = b.decode(&self.pkt_buf[0..b.size as usize]);
         match decoded_m {
             ServerMessage::Time(t) => {
-                self.latency_buf.push_back(t.latency);
-                // t.latency may go down
+                let c2s = b.received_tv /*(server) */ - self.last_sent_time /* client */ /*+ LAT (?) */;
+                let s2c = recv_ts /*recv (systemtime::now()) */ - b.sent_tv /*(server) + LAT (?)*/;
+                let lat = (c2s + s2c) / 2;
+
+                // t.latency is actually "time-base conversion" from server-tbase to client-tbase
+                self.latency_buf.push_back(lat + t.latency);
+
                 for (i, tv) in self.latency_buf.iter().enumerate() {
                     self.sorted_latency_buf[i] = *tv;
                 }
