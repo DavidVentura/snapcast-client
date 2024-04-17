@@ -2,7 +2,7 @@ use crate::proto::{Base, ClientHello, CodecHeader, ServerMessage, Time, TimeVal,
 use circular_buffer::CircularBuffer;
 use std::io::prelude::*;
 use std::net::{TcpStream, ToSocketAddrs};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 pub struct Client {
     mac: String,
@@ -19,7 +19,6 @@ pub enum Message<'a> {
 #[derive(Debug)]
 pub struct ConnectedClient {
     conn: TcpStream,
-    time_zero: Duration,
     time_base: Instant,
     last_time_sent: Instant,
     latency_buf: CircularBuffer<50, TimeVal>,
@@ -29,7 +28,9 @@ pub struct ConnectedClient {
     pkt_id: u16,
     server_buffer_ms: TimeVal,
     local_latency: TimeVal,
+    last_tval: TimeVal,
     last_sent_time: TimeVal,
+    latency: TimeVal,
 }
 
 impl ConnectedClient {
@@ -39,7 +40,6 @@ impl ConnectedClient {
             Err(e) => log::error!("Failed to set nodelay on connection: {:?}", e),
         }
         let time_base = Instant::now();
-        let time_zero = time_base.elapsed();
 
         let latency_buf = CircularBuffer::new();
         let cap = latency_buf.capacity();
@@ -48,7 +48,6 @@ impl ConnectedClient {
         Ok(ConnectedClient {
             conn,
             time_base,
-            time_zero,
             latency_buf,
             hdr_buf: vec![0; Base::BASE_SIZE],
             pkt_buf: vec![0; 9000], // pcm data is up to 4880b; localhost mtu gets up to 9k
@@ -60,6 +59,7 @@ impl ConnectedClient {
                 usec: 999_999,
             },
             local_latency: TimeVal { sec: 0, usec: 0 },
+            last_tval: TimeVal { sec: 0, usec: 0 },
             last_sent_time: TimeVal { sec: 0, usec: 0 },
             latency: TimeVal {
                 sec: 0,
@@ -134,8 +134,8 @@ impl ConnectedClient {
                 Ok(Message::Nothing)
             }
             ServerMessage::WireChunk(wc) => {
-                let t_s = wc.timestamp;
-                let t_c = t_s - median_tbase;
+                let t_c = wc.timestamp - self.latency;
+                let tb = self.time_base.elapsed();
                 let audible_at = t_c + self.server_buffer_ms - self.local_latency;
                 Ok(Message::WireChunk(wc, audible_at))
             }
