@@ -21,7 +21,7 @@ pub struct ConnectedClient {
     conn: TcpStream,
     time_base: Instant,
     last_time_sent: Instant,
-    latency_buf: CircularBuffer<50, TimeVal>,
+    latency_buf: CircularBuffer<10, TimeVal>, // FIXME
     sorted_latency_buf: Vec<TimeVal>,
     hdr_buf: Vec<u8>,
     pkt_buf: Vec<u8>,
@@ -137,6 +137,21 @@ impl ConnectedClient {
                 let t_c = wc.timestamp - self.latency;
                 let tb = self.time_base.elapsed();
                 let audible_at = t_c + self.server_buffer_ms - self.local_latency;
+                // the jitter is large - min is 0.9ms, avg is 19ms and max is 52ms
+                let cmp = audible_at - tb.into();
+                if cmp.sec < 0 {
+                    println!("negative ts from net. cmp {cmp:?} (norm {:?}) = aud_at {audible_at:?} - tb {tb:?}", cmp.normalize());
+                    println!(
+                        "aud_at = t_c {t_c:?} + buf_ms {:?} - local_lat {:?}",
+                        self.server_buffer_ms, self.local_latency
+                    );
+                    println!("wc.ts {:?} - lat {:?}", wc.timestamp, self.latency);
+                    println!("tb {tb:?} - last_tval {:?}", self.last_tval);
+                    self.last_tval = wc.timestamp;
+                    return Ok(Message::Nothing);
+                }
+                self.last_tval = wc.timestamp;
+
                 Ok(Message::WireChunk(wc, audible_at))
             }
             ServerMessage::ServerSettings(ref s) => {
