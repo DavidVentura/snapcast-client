@@ -11,6 +11,12 @@ pub struct TimeVal {
 }
 
 impl TimeVal {
+    pub fn as_buf(&self) -> Vec<u8> {
+        let mut v = Vec::with_capacity(8);
+        v.extend_from_slice(&i32::to_le_bytes(self.sec));
+        v.extend_from_slice(&i32::to_le_bytes(self.usec));
+        v
+    }
     pub fn abs(&self) -> TimeVal {
         if self.sec == -1 {
             return TimeVal {
@@ -102,15 +108,6 @@ impl Div<i32> for TimeVal {
     }
 }
 
-impl From<TimeVal> for Vec<u8> {
-    fn from(tv: TimeVal) -> Vec<u8> {
-        let mut v = Vec::with_capacity(8);
-        v.extend_from_slice(&i32::to_le_bytes(tv.sec));
-        v.extend_from_slice(&i32::to_le_bytes(tv.usec));
-        v
-    }
-}
-
 #[repr(u16)]
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum MessageType {
@@ -122,6 +119,12 @@ pub enum MessageType {
     Hello = 5,
     StreamTags = 6,
     ClientInfo = 7,
+}
+
+#[derive(Debug, PartialEq)]
+pub enum ClientMessage<'a> {
+    Time(Time),
+    Hello(ClientHello<'a>),
 }
 
 #[derive(Debug, PartialEq)]
@@ -154,7 +157,7 @@ pub struct Base {
     refers_to: u16,
     pub(crate) sent_tv: TimeVal,
     pub(crate) received_tv: TimeVal,
-    pub(crate) size: u32,
+    pub size: u32,
 }
 
 fn slice_to_u16(s: &[u8]) -> u16 {
@@ -186,6 +189,23 @@ impl<'a> From<&'a [u8]> for CodecHeader<'a> {
         CodecHeader { codec, metadata }
     }
 }
+impl ServerSettings {
+    pub fn as_buf(&self) -> Vec<u8> {
+        let s = serde_json::to_string(self).unwrap();
+        let payload = s.into_bytes();
+        let mut payload_len_buf = u32::to_le_bytes(payload.len() as u32).to_vec();
+        payload_len_buf.extend_from_slice(&payload);
+        Base {
+            mtype: MessageType::ServerSettings,
+            id: 0,
+            refers_to: 0,
+            sent_tv: TimeVal { sec: 0, usec: 0 },
+            received_tv: TimeVal { sec: 0, usec: 0 },
+            size: payload_len_buf.len() as u32,
+        }
+        .as_buf(&payload_len_buf)
+    }
+}
 impl<'a> From<&'a [u8]> for ServerSettings {
     fn from(buf: &'a [u8]) -> ServerSettings {
         let len = slice_to_u32(&buf[0..4]);
@@ -194,6 +214,20 @@ impl<'a> From<&'a [u8]> for ServerSettings {
     }
 }
 
+impl WireChunk<'_> {
+    pub fn as_buf(&self) -> Vec<u8> {
+        let payload = [&self.timestamp.as_buf(), self.payload].concat();
+        Base {
+            mtype: MessageType::WireChunk,
+            id: 0,
+            refers_to: 0,
+            sent_tv: TimeVal { sec: 0, usec: 0 },
+            received_tv: TimeVal { sec: 0, usec: 0 },
+            size: payload.len() as u32,
+        }
+        .as_buf(&payload)
+    }
+}
 impl<'a> From<&'a [u8]> for WireChunk<'a> {
     fn from(buf: &'a [u8]) -> WireChunk<'a> {
         let size = slice_to_u32(&buf[8..12]);
@@ -244,6 +278,13 @@ impl Base {
             _ => todo!("didnt get to {:?}", self.mtype),
         }
     }
+    pub fn decode_c<'a>(&self, payload: &'a [u8]) -> ClientMessage<'a> {
+        match self.mtype {
+            MessageType::Hello => ClientMessage::Hello(ClientHello::from(payload)),
+            MessageType::Time => ClientMessage::Time(Time::from(payload)),
+            _ => todo!("didnt get to {:?}", self.mtype),
+        }
+    }
 
     fn as_buf(&self, payload: &[u8]) -> Vec<u8> {
         let mut buf = Vec::with_capacity(payload.len() + Base::BASE_SIZE);
@@ -264,13 +305,8 @@ impl Base {
 impl Time {
     // TODO: this should be a TimeReq which is mut
     // to prevent these stupid 8 byte allocations (latency)
-    pub(crate) fn as_buf(
-        id: u16,
-        sent_tv: TimeVal,
-        received_tv: TimeVal,
-        latency: TimeVal,
-    ) -> Vec<u8> {
-        let payload = Vec::<u8>::from(latency);
+    pub fn as_buf(id: u16, sent_tv: TimeVal, received_tv: TimeVal, latency: TimeVal) -> Vec<u8> {
+        let payload = latency.as_buf();
         Base {
             mtype: MessageType::Time,
             id,
@@ -282,6 +318,7 @@ impl Time {
         .as_buf(&payload)
     }
 }
+
 impl<'a> ClientHello<'a> {
     pub fn as_buf(&self) -> Vec<u8> {
         let p_str = serde_json::to_string(&self).unwrap();
@@ -301,7 +338,7 @@ impl<'a> ClientHello<'a> {
     }
 }
 
-#[derive(Debug, Deserialize, PartialEq)]
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
 #[allow(non_snake_case)]
 pub struct ServerSettings {
     pub bufferMs: u32,
@@ -309,6 +346,7 @@ pub struct ServerSettings {
     pub muted: bool,
     pub volume: u8,
 }
+
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub struct OpusMetadata {
     pub sample_rate: u32,
@@ -416,7 +454,7 @@ pub struct Time {
     pub(crate) latency: TimeVal,
 }
 #[allow(non_snake_case)]
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize, Debug, PartialEq)]
 pub struct ClientHello<'a> {
     pub MAC: &'a str,
     pub HostName: &'a str,
@@ -427,6 +465,13 @@ pub struct ClientHello<'a> {
     pub Instance: u8,
     pub ID: &'a str,
     pub SnapStreamProtocolVersion: u8, // this one shouldn't be pub
+}
+impl<'a> From<&'a [u8]> for ClientHello<'a> {
+    fn from(buf: &'a [u8]) -> ClientHello<'a> {
+        let len = slice_to_u32(buf);
+        let c: ClientHello = serde_json::from_slice(&buf[4..len as usize + 4]).unwrap();
+        c
+    }
 }
 
 #[cfg(test)]
@@ -440,6 +485,21 @@ mod tests {
         let expected = TimeVal { sec: 0, usec: -1 };
 
         assert_eq!((tv1 - tv2).abs(), expected);
+    }
+
+    #[test]
+    fn test_sub_timeval_bug() {
+        let tv1 = TimeVal {
+            sec: 3514,
+            usec: 384503,
+        };
+        let tv2 = TimeVal::from(Duration::from_secs(3514) + Duration::from_micros(743652));
+        let expected = TimeVal {
+            sec: 0,
+            usec: -359149,
+        };
+
+        assert_eq!((tv1 - tv2).normalize(), expected);
     }
     #[test]
     fn test_pcm_ch() {
