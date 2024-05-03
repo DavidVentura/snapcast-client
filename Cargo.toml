@@ -27,6 +27,7 @@ circular-buffer = "0.1.6"
 clap = { version = "4.5.2", features = ["derive"] }
 claxon = { path = "/home/david/git/claxon", optional = true }
 log = "0.4.21"
+claxon = { git = "https://github.com/DavidVentura/claxon.git", optional = true, branch = "borrow-api" }
 
 [lib]
 src = "src/lib.rs"
