@@ -61,7 +61,7 @@ fn main() -> anyhow::Result<()> {
                 sample_tx.send((audible_at, wc.payload.to_vec()))?;
             }
 
-            Message::PlaybackVolume(_v) => {
+            Message::ServerSettings(_v) => {
                 // TODO volume
             }
             _ => (),
@@ -77,7 +77,8 @@ fn handle_samples(
 ) {
     // >= (960 * 2) for OPUS
     // >= 2880 for PCM
-    let mut samples_out = vec![0; 4096];
+    // >= 4600 for FLAC
+    let mut samples_out = vec![0; 4700];
 
     let mut player_lat_ms: u16 = 1;
     while let Ok((client_audible_ts, samples)) = sample_rx.recv() {

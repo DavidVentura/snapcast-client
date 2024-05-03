@@ -12,7 +12,7 @@ pub struct Client {
 pub enum Message<'a> {
     Nothing,
     WireChunk(WireChunk<'a>, TimeVal),
-    PlaybackVolume(u8),
+    ServerSettings(ServerSettings),
     CodecHeader(CodecHeader<'a>),
 }
 
@@ -154,10 +154,10 @@ impl ConnectedClient {
 
                 Ok(Message::WireChunk(wc, audible_at))
             }
-            ServerMessage::ServerSettings(ref s) => {
+            ServerMessage::ServerSettings(s) => {
                 self.server_buffer_ms = TimeVal::from_millis(s.bufferMs as i32);
                 self.local_latency = TimeVal::from_millis(s.latency as i32);
-                Ok(Message::PlaybackVolume(s.volume))
+                Ok(Message::ServerSettings(s))
             }
             ServerMessage::CodecHeader(ch) => Ok(Message::CodecHeader(ch)),
         }
