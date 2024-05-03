@@ -1,4 +1,6 @@
-use crate::proto::{Base, ClientHello, CodecHeader, ServerMessage, Time, TimeVal, WireChunk};
+use crate::proto::{
+    Base, ClientHello, CodecHeader, ServerMessage, ServerSettings, Time, TimeVal, WireChunk,
+};
 use circular_buffer::CircularBuffer;
 use std::io::prelude::*;
 use std::net::{TcpStream, ToSocketAddrs};
