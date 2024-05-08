@@ -1,10 +1,11 @@
 use crate::proto::{
     Base, ClientHello, CodecHeader, ServerMessage, ServerSettings, Time, TimeVal, WireChunk,
 };
+use anyhow::Context;
 use circular_buffer::CircularBuffer;
 use std::io::prelude::*;
 use std::net::{TcpStream, ToSocketAddrs};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 pub struct Client {
     mac: String,
@@ -30,7 +31,6 @@ pub struct ConnectedClient {
     pkt_id: u16,
     server_buffer_ms: TimeVal,
     local_latency: TimeVal,
-    last_tval: TimeVal,
     last_sent_time: TimeVal,
     latency: TimeVal,
 }
@@ -42,17 +42,17 @@ impl ConnectedClient {
             Err(e) => log::error!("Failed to set nodelay on connection: {:?}", e),
         }
         let time_base = Instant::now();
-
         let latency_buf = CircularBuffer::new();
         let cap = latency_buf.capacity();
         let tv_zero = TimeVal { sec: 0, usec: 0 };
 
+        conn.set_read_timeout(Some(Duration::from_secs(1)))?;
         Ok(ConnectedClient {
             conn,
             time_base,
             latency_buf,
             hdr_buf: vec![0; Base::BASE_SIZE],
-            pkt_buf: vec![0; 9000], // pcm data is up to 4880b; localhost mtu gets up to 9k
+            pkt_buf: vec![0; 9000],
             sorted_latency_buf: vec![tv_zero; cap],
             pkt_id: 0,
             last_time_sent: Instant::now(),
@@ -61,12 +61,12 @@ impl ConnectedClient {
                 usec: 999_999,
             },
             local_latency: TimeVal { sec: 0, usec: 0 },
-            last_tval: TimeVal { sec: 0, usec: 0 },
             last_sent_time: TimeVal { sec: 0, usec: 0 },
             latency: TimeVal {
                 sec: 0,
                 usec: 1_000,
             },
+            //data_buf: Box::new(CircularBuffer::new()),
         })
     }
 
@@ -109,13 +109,29 @@ impl ConnectedClient {
     pub fn tick(&mut self) -> anyhow::Result<Message> {
         self.fill_latency_buf()?;
 
-        self.conn.read_exact(&mut self.hdr_buf)?;
+        let r = self.conn.read_exact(&mut self.hdr_buf);
+        match r {
+            Ok(()) => (),
+            Err(e) => match e.kind() {
+                std::io::ErrorKind::WouldBlock => {
+                    return Ok(Message::Nothing);
+                }
+                _ => return Err(e.into()),
+            },
+        }
         let b = Base::from(self.hdr_buf.as_slice());
+        if b.size as usize > self.pkt_buf.len() {
+            log::warn!("Resizing pkt buf to {}", b.size);
+            println!("Resizing pkt buf to {}", b.size);
+            // pcm data is up to 4880b; flac is up to 9k~
+            self.pkt_buf.resize(b.size as usize, 0);
+        }
         self.conn
-            .read_exact(&mut self.pkt_buf[0..b.size as usize])?;
-        let recv_ts = TimeVal::from(self.time_base.elapsed());
+            .read_exact(&mut self.pkt_buf[0..b.size as usize])
+            .context("cannot read pkt")?;
 
         let decoded_m = b.decode(&self.pkt_buf[0..b.size as usize]);
+        let recv_ts = TimeVal::from(self.time_base.elapsed());
         match decoded_m {
             ServerMessage::Time(t) => {
                 let c2s = b.received_tv /*(server) */ - self.last_sent_time /* client */ /*+ LAT (?) */;
@@ -139,20 +155,12 @@ impl ConnectedClient {
                 let t_c = wc.timestamp - self.latency;
                 let tb = self.time_base.elapsed();
                 let audible_at = t_c + self.server_buffer_ms - self.local_latency;
-                // the jitter is large - min is 0.9ms, avg is 19ms and max is 52ms
+
                 let cmp = audible_at - tb.into();
                 if cmp.sec < 0 {
-                    println!("negative ts from net. cmp {cmp:?} (norm {:?}) = aud_at {audible_at:?} - tb {tb:?}", cmp.normalize());
-                    println!(
-                        "aud_at = t_c {t_c:?} + buf_ms {:?} - local_lat {:?}",
-                        self.server_buffer_ms, self.local_latency
-                    );
-                    println!("wc.ts {:?} - lat {:?}", wc.timestamp, self.latency);
-                    println!("tb {tb:?} - last_tval {:?}", self.last_tval);
-                    self.last_tval = wc.timestamp;
+                    println!("Value in the past from net; dropping ({cmp:?})");
                     return Ok(Message::Nothing);
                 }
-                self.last_tval = wc.timestamp;
 
                 Ok(Message::WireChunk(wc, audible_at))
             }
