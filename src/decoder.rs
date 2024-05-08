@@ -33,11 +33,13 @@ impl Decoder {
                     };
                     return Ok(Decoder::Opus(opus::Decoder::new(config.sample_rate, c)?));
                 }
+                #[cfg(not(feature = "opus"))]
                 anyhow::bail!("Opus disabled at build time");
             }
             CodecMetadata::Flac(_buf) => {
                 #[cfg(feature = "flac")]
                 return Ok(Decoder::Flac(FlacDecoder::new()));
+                #[cfg(not(feature = "flac"))]
                 anyhow::bail!("Flac disabled at build time");
             }
             _ => anyhow::bail!("Don't know how to handle {:?}", ch.metadata),
