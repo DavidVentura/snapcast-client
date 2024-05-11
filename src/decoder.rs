@@ -42,7 +42,6 @@ impl Decoder {
                 #[cfg(not(feature = "flac"))]
                 anyhow::bail!("Flac disabled at build time");
             }
-            _ => anyhow::bail!("Don't know how to handle {:?}", ch.metadata),
         }
     }
 }
