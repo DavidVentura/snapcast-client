@@ -6,10 +6,10 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-default = []
+default = ["opus"]
 pulse = ["dep:libpulse-binding", "libpulse-simple-binding"]
 alsa = ["dep:alsa"]
-opus = ["dep:opus"]
+opus = ["dep:opus-embedded"]
 flac = ["dep:claxon"]
 
 [dependencies]
@@ -18,7 +18,7 @@ anyhow = "1.0.81"
 alsa = { version = "0.9.0", optional = true }
 libpulse-binding = { version = "2.28.1", optional = true }
 libpulse-simple-binding = { version = "2.28.1", optional = true }
-opus = { version = "0.3.0", optional = true }
+opus-embedded = { version = "0.1.1", optional = true, features=["stereo"]}
 
 serde = { version = "1.0.197", features = ["derive"] }
 serde_json = "1.0.114"
@@ -29,6 +29,7 @@ simple-mdns = {version = "0.6.2", features = ["sync"]}
 simple-dns = "0.7.0"
 log = "0.4.21"
 claxon = { git = "https://github.com/DavidVentura/claxon.git", optional = true, branch = "borrow-api" }
+bindgen = "0.72.0"
 
 [lib]
 src = "src/lib.rs"

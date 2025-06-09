@@ -37,7 +37,7 @@ fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
     let client = Client::new("11:22:33:44:55:66".into(), "framework".into());
-    let mut client = client.connect("192.168.2.131:1704")?;
+    let mut client = client.connect("192.168.2.183:1704")?;
     let time_base_c = client.time_base();
 
     let dec: Arc<Mutex<Option<Decoder>>> = Arc::new(Mutex::new(None));

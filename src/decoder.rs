@@ -1,4 +1,5 @@
 use crate::proto::{CodecHeader, CodecMetadata};
+use anyhow::Context;
 use anyhow::Result;
 use enum_dispatch::enum_dispatch;
 
@@ -6,12 +7,12 @@ use enum_dispatch::enum_dispatch;
 use claxon::frame::FrameReader;
 
 #[cfg(feature = "opus")]
-use opus;
+use opus_embedded;
 
 #[enum_dispatch(Decode)]
 pub enum Decoder {
     #[cfg(feature = "opus")]
-    Opus(opus::Decoder),
+    Opus(opus_embedded::Decoder),
     PCM(NoOpDecoder),
     #[cfg(feature = "flac")]
     Flac(FlacDecoder),
@@ -27,11 +28,17 @@ impl Decoder {
                 #[cfg(feature = "opus")]
                 {
                     let c = match config.channel_count {
-                        1 => opus::Channels::Mono,
-                        2 => opus::Channels::Stereo,
+                        1 => opus_embedded::Channels::Mono,
+                        2 => opus_embedded::Channels::Stereo,
                         _ => panic!("unsupported channel configuration"),
                     };
-                    return Ok(Decoder::Opus(opus::Decoder::new(config.sample_rate, c)?));
+                    let s = match config.sample_rate {
+                        48_000 => opus_embedded::SamplingRate::F48k,
+                        _ => panic!("only supports 48_000 sampling rate for opus"),
+                    };
+                    return Ok(Decoder::Opus(
+                        opus_embedded::Decoder::new(s, c).context("making opus decoder")?,
+                    ));
                 }
                 #[cfg(not(feature = "opus"))]
                 anyhow::bail!("Opus disabled at build time");
@@ -53,10 +60,10 @@ pub trait Decode {
 }
 
 #[cfg(feature = "opus")]
-impl Decode for opus::Decoder {
+impl Decode for opus_embedded::Decoder {
     fn decode_sample(&mut self, buf: &[u8], out: &mut [i16]) -> Result<usize, anyhow::Error> {
         // TODO: fec?
-        Ok(self.decode(buf, out, false)? * 2)
+        Ok(self.decode(buf, out).context("decode")?.len())
     }
 }
 
