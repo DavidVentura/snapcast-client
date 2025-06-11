@@ -1,4 +1,4 @@
-use std::ops::{Add, Div, Sub};
+use core::ops::{Add, Div, Sub};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};

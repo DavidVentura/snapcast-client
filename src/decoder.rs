@@ -79,9 +79,11 @@ impl Decode for NoOpDecoder {
     }
 }
 
+#[cfg(feature = "flac")]
 pub struct FlacDecoder {
     dec_buf: Vec<i32>,
 }
+#[cfg(feature = "flac")]
 impl FlacDecoder {
     pub fn new() -> FlacDecoder {
         FlacDecoder {
