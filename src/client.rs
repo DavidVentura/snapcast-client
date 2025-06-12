@@ -13,6 +13,7 @@ pub struct Client {
 }
 
 pub enum Message<'a> {
+    Expired,
     Nothing,
     WireChunk(WireChunk<'a>, TimeVal),
     ServerSettings(ServerSettings),
@@ -24,7 +25,7 @@ pub struct ConnectedClient {
     conn: TcpStream,
     time_base: Instant,
     last_time_sent: Instant,
-    latency_buf: CircularBuffer<10, TimeVal>, // FIXME
+    latency_buf: CircularBuffer<20, TimeVal>, // FIXME
     sorted_latency_buf: Vec<TimeVal>,
     hdr_buf: Vec<u8>,
     pkt_buf: Vec<u8>,
@@ -94,12 +95,10 @@ impl ConnectedClient {
 
     fn fill_latency_buf(&mut self) -> anyhow::Result<()> {
         let lts = self.last_time_sent.elapsed();
-        let filling_buf = self.latency_buf.len() < self.latency_buf.capacity();
-        let empty = self.latency_buf.len() == 0;
 
         // Want to fill the initial latency buffer fairly quickly (1ms between iters)
         // afterwards, a measurement a second should be OK
-        if empty || (filling_buf && lts.as_millis() > 0) || lts.as_secs() >= 1 {
+        if (!self.synchronized() && lts.as_millis() > 0) || lts.as_secs() >= 1 {
             self.send_time()?;
             self.last_time_sent = Instant::now();
         }
@@ -159,7 +158,12 @@ impl ConnectedClient {
                 let cmp = audible_at - tb.into();
                 if cmp.sec < 0 {
                     println!("Value in the past from net; dropping ({cmp:?})");
-                    return Ok(Message::Nothing);
+                    println!(
+                        "now is {:?}, wirechunk ts is {:?}, latency is {:?}",
+                        tb, wc.timestamp, self.latency
+                    );
+                    println!("cicbuf {:?}", self.sorted_latency_buf);
+                    return Ok(Message::Expired);
                 }
 
                 Ok(Message::WireChunk(wc, audible_at))
