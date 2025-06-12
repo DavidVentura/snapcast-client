@@ -1,4 +1,5 @@
 use crate::proto::{CodecHeader, CodecMetadata};
+#[cfg(feature = "opus")]
 use anyhow::Context;
 use anyhow::Result;
 use enum_dispatch::enum_dispatch;
