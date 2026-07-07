@@ -14,8 +14,9 @@ use proto::{CodecHeader, TimeVal};
 use clap::Parser;
 use decoder::{Decode, Decoder};
 
+use std::net::{Ipv4Addr, SocketAddrV4};
 use std::sync::{mpsc, Arc, Mutex};
-use std::time;
+use std::time::{self, Instant};
 
 #[derive(clap::ValueEnum, Debug, Copy, Clone)]
 enum PlayerBackend {
@@ -36,9 +37,17 @@ struct Args {
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
-    let client = Client::new("11:22:33:44:55:66".into(), "framework".into());
-    let mut client = client.connect("192.168.2.183:1704")?;
-    let time_base_c = client.time_base();
+    let start = Instant::now();
+
+    let mut client = Client::new(
+        "11:22:33:44:55:66".into(),
+        "framework".into(),
+        0,
+        SocketAddrV4::new(Ipv4Addr::new(192, 168, 2, 183), 1704),
+    )
+    .unwrap();
+    // let mut client = client.connect("192.168.2.183:1704")?;
+    let time_base_c = start; //client.time_base();
 
     let dec: Arc<Mutex<Option<Decoder>>> = Arc::new(Mutex::new(None));
     let dec_2 = dec.clone();
@@ -49,8 +58,14 @@ fn main() -> anyhow::Result<()> {
     let (sample_tx, sample_rx) = mpsc::channel::<(TimeVal, Vec<u8>)>();
     std::thread::spawn(move || handle_samples(sample_rx, time_base_c, player, dec));
 
+    let mut packet_buf: Vec<u8> = vec![0; 9000];
     loop {
-        let msg = client.tick()?;
+        let d = start.elapsed().as_micros();
+        let secs = start.elapsed().as_secs();
+        let usecs = (d % 1_000_000) as u64;
+        let d = secs * 1_000_000 + usecs;
+        println!("now (us) {d}");
+        let msg = client.tick(d as u64, packet_buf.as_mut_slice())?;
         match msg {
             Message::CodecHeader(ch) => {
                 _ = dec_2.lock().unwrap().insert(Decoder::new(&ch)?);
@@ -58,6 +73,7 @@ fn main() -> anyhow::Result<()> {
                 _ = player_2.lock().unwrap().insert(p);
             }
             Message::WireChunk(wc, audible_at) => {
+                println!("got wc with timestamp audible_at {audible_at:?}");
                 sample_tx.send((audible_at, wc.payload.to_vec()))?;
             }
 
@@ -84,6 +100,11 @@ fn handle_samples(
     while let Ok((client_audible_ts, samples)) = sample_rx.recv() {
         let mut valid = true;
         loop {
+            println!(
+                "handling sample {:?} {:?}",
+                client_audible_ts,
+                time_base_c.elapsed()
+            );
             let remaining = client_audible_ts - time_base_c.elapsed().into();
             if remaining.sec < 0 {
                 valid = false;

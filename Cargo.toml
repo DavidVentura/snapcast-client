@@ -6,11 +6,12 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-default = ["opus"]
+default = ["flac", "std"]
 pulse = ["dep:libpulse-binding", "libpulse-simple-binding"]
 alsa = ["dep:alsa"]
 opus = ["dep:opus-embedded"]
 flac = ["dep:claxon"]
+std = []
 
 [dependencies]
 anyhow = "1.0.81"

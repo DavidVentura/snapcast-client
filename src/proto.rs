@@ -1,4 +1,5 @@
 use core::ops::{Add, Div, Sub};
+#[cfg(feature = "std")]
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -11,6 +12,10 @@ pub struct TimeVal {
 }
 
 impl TimeVal {
+    pub fn write(&self, buf: &mut [u8]) {
+        buf[0..4].copy_from_slice(&i32::to_le_bytes(self.sec));
+        buf[4..8].copy_from_slice(&i32::to_le_bytes(self.usec));
+    }
     pub fn as_buf(&self) -> Vec<u8> {
         let mut v = Vec::with_capacity(8);
         v.extend_from_slice(&i32::to_le_bytes(self.sec));
@@ -72,6 +77,16 @@ impl From<&[u8]> for TimeVal {
     }
 }
 
+impl From<u64> for TimeVal {
+    fn from(time_us: u64) -> TimeVal {
+        TimeVal {
+            sec: (time_us / 1_000_000) as i32, // allows for 68 years of uptime
+            usec: (time_us % 1_000_000) as i32,
+        }
+    }
+}
+
+#[cfg(feature = "std")]
 impl From<Duration> for TimeVal {
     fn from(d: Duration) -> TimeVal {
         TimeVal {
@@ -146,7 +161,7 @@ impl From<u16> for MessageType {
             5 => MessageType::Hello,
             6 => MessageType::StreamTags,
             7 => MessageType::ClientInfo,
-            _ => panic!("Illegal message type"),
+            other => panic!("Illegal message type: {other}"),
         }
     }
 }
@@ -306,6 +321,7 @@ impl Time {
     // TODO: this should be a TimeReq which is mut
     // to prevent these stupid 8 byte allocations (latency)
     pub fn as_buf(id: u16, sent_tv: TimeVal, received_tv: TimeVal, latency: TimeVal) -> Vec<u8> {
+        // TODO here
         let payload = latency.as_buf();
         Base {
             mtype: MessageType::Time,
@@ -493,7 +509,7 @@ mod tests {
             sec: 3514,
             usec: 384503,
         };
-        let tv2 = TimeVal::from(Duration::from_secs(3514) + Duration::from_micros(743652));
+        let tv2 = TimeVal::from(3514 * 1_000_000 + 743652);
         let expected = TimeVal {
             sec: 0,
             usec: -359149,
