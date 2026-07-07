@@ -13,7 +13,8 @@ pub struct Client {
 }
 
 pub enum Message<'a> {
-    Expired,
+    /// A WireChunk whose audible time already passed; carries how late it was
+    Expired(TimeVal),
     Nothing,
     WireChunk(WireChunk<'a>, TimeVal),
     ServerSettings(ServerSettings),
@@ -157,13 +158,10 @@ impl ConnectedClient {
 
                 let cmp = audible_at - tb.into();
                 if cmp.sec < 0 {
-                    println!("Value in the past from net; dropping ({cmp:?})");
-                    println!(
-                        "now is {:?}, wirechunk ts is {:?}, latency is {:?}",
-                        tb, wc.timestamp, self.latency
-                    );
-                    println!("cicbuf {:?}", self.sorted_latency_buf);
-                    return Ok(Message::Expired);
+                    // deliberately silent: printing here (blocking UART on embedded)
+                    // makes drop-processing slower than the chunk rate, so a client
+                    // that falls behind can never catch up; the caller rate-limits
+                    return Ok(Message::Expired(cmp));
                 }
 
                 Ok(Message::WireChunk(wc, audible_at))
