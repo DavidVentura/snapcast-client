@@ -12,8 +12,10 @@ use opus_embedded;
 
 #[enum_dispatch(Decode)]
 pub enum Decoder {
+    // Boxed: the opus decoder state is ~27KiB inline, which would otherwise
+    // become the size of this enum (and of every stack temporary holding it)
     #[cfg(feature = "opus")]
-    Opus(opus_embedded::Decoder),
+    Opus(Box<opus_embedded::Decoder>),
     PCM(NoOpDecoder),
     #[cfg(feature = "flac")]
     Flac(FlacDecoder),
@@ -38,7 +40,7 @@ impl Decoder {
                         _ => panic!("only supports 48_000 sampling rate for opus"),
                     };
                     return Ok(Decoder::Opus(
-                        opus_embedded::Decoder::new(s, c).context("making opus decoder")?,
+                        opus_embedded::Decoder::new_boxed(s, c).context("making opus decoder")?,
                     ));
                 }
                 #[cfg(not(feature = "opus"))]
@@ -61,7 +63,7 @@ pub trait Decode {
 }
 
 #[cfg(feature = "opus")]
-impl Decode for opus_embedded::Decoder {
+impl Decode for Box<opus_embedded::Decoder> {
     fn decode_sample(&mut self, buf: &[u8], out: &mut [i16]) -> Result<usize, anyhow::Error> {
         // TODO: fec?
         Ok(self.decode(buf, out).context("decode")?.len())
