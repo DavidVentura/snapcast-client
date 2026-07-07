@@ -133,13 +133,24 @@ impl ConnectedClient {
         let decoded_m = b.decode(&self.pkt_buf[0..b.size as usize]);
         let recv_ts = TimeVal::from(self.time_base.elapsed());
         match decoded_m {
-            ServerMessage::Time(t) => {
-                let c2s = b.received_tv /*(server) */ - self.last_sent_time /* client */ /*+ LAT (?) */;
-                let s2c = recv_ts /*recv (systemtime::now()) */ - b.sent_tv /*(server) + LAT (?)*/;
-                let lat = (c2s + s2c) / 2;
+            ServerMessage::Time(_) => {
+                // c2s = clock_offset + uplink_delay; s2c = -clock_offset + downlink_delay
+                // their difference cancels the (symmetric) network delay, leaving the
+                // server-to-client clock offset; summing would cancel the offset instead
+                let c2s = b.received_tv /*(server) */ - self.last_sent_time /* client */;
+                let s2c = recv_ts /*recv (systemtime::now()) */ - b.sent_tv /*(server)*/;
+                let diff = c2s - s2c;
+                // TimeVal::div truncates sec and usec separately, which loses up to
+                // 500ms when sec is odd; divide in microseconds instead
+                let diff_us = (diff.sec as i64) * 1_000_000 + diff.usec as i64;
+                let offset_us = diff_us / 2;
+                let offset = TimeVal {
+                    sec: (offset_us / 1_000_000) as i32,
+                    usec: (offset_us % 1_000_000) as i32,
+                }
+                .normalize();
 
-                // t.latency is actually "time-base conversion" from server-tbase to client-tbase
-                self.latency_buf.push_back(lat + t.latency);
+                self.latency_buf.push_back(offset);
 
                 for (i, tv) in self.latency_buf.iter().enumerate() {
                     self.sorted_latency_buf[i] = *tv;
