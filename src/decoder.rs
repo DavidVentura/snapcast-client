@@ -1,4 +1,5 @@
-use crate::proto::{CodecHeader, CodecMetadata};
+#[cfg(feature = "opus")]
+use crate::proto::OpusMetadata;
 #[cfg(feature = "opus")]
 use anyhow::Context;
 use anyhow::Result;
@@ -10,69 +11,65 @@ use claxon::frame::FrameReader;
 #[cfg(feature = "opus")]
 use opus_embedded;
 
+#[cfg(feature = "opus")]
+pub struct OpusDecoder<'a>(&'a mut opus_embedded::Decoder);
+
 #[enum_dispatch(Decode)]
-pub enum Decoder {
-    // Boxed: the opus decoder state is ~27KiB inline, which would otherwise
-    // become the size of this enum (and of every stack temporary holding it)
+pub enum Decoder<'a> {
     #[cfg(feature = "opus")]
-    Opus(Box<opus_embedded::Decoder>),
+    Opus(OpusDecoder<'a>),
     PCM(NoOpDecoder),
     #[cfg(feature = "flac")]
     Flac(FlacDecoder),
 }
 
-impl Decoder {
-    pub fn new(ch: &CodecHeader) -> anyhow::Result<Decoder> {
-        match &ch.metadata {
-            CodecMetadata::Pcm(_) => Ok(Decoder::PCM(NoOpDecoder {})),
+impl<'a> Decoder<'a> {
+    pub fn new_pcm() -> Decoder<'a> {
+        Decoder::PCM(NoOpDecoder {})
+    }
 
-            #[allow(unused_variables)]
-            CodecMetadata::Opus(config) => {
-                #[cfg(feature = "opus")]
-                {
-                    let c = match config.channel_count {
-                        1 => opus_embedded::Channels::Mono,
-                        2 => opus_embedded::Channels::Stereo,
-                        _ => panic!("unsupported channel configuration"),
-                    };
-                    let s = match config.sample_rate {
-                        48_000 => opus_embedded::SamplingRate::F48k,
-                        _ => panic!("only supports 48_000 sampling rate for opus"),
-                    };
-                    return Ok(Decoder::Opus(
-                        opus_embedded::Decoder::new_boxed(s, c).context("making opus decoder")?,
-                    ));
-                }
-                #[cfg(not(feature = "opus"))]
-                anyhow::bail!("Opus disabled at build time");
-            }
-            CodecMetadata::Flac(_buf) => {
-                #[cfg(feature = "flac")]
-                return Ok(Decoder::Flac(FlacDecoder::new()));
-                #[cfg(not(feature = "flac"))]
-                anyhow::bail!("Flac disabled at build time");
-            }
-        }
+    #[cfg(feature = "flac")]
+    pub fn new_flac() -> Decoder<'a> {
+        Decoder::Flac(FlacDecoder::new())
+    }
+
+    #[cfg(feature = "opus")]
+    pub fn new_opus(
+        config: &OpusMetadata,
+        slot: &'a mut core::mem::MaybeUninit<opus_embedded::Decoder>,
+    ) -> anyhow::Result<Decoder<'a>> {
+        let c = match config.channel_count {
+            1 => opus_embedded::Channels::Mono,
+            2 => opus_embedded::Channels::Stereo,
+            _ => panic!("unsupported channel configuration"),
+        };
+        let s = match config.sample_rate {
+            48_000 => opus_embedded::SamplingRate::F48k,
+            _ => panic!("only supports 48_000 sampling rate for opus"),
+        };
+        let dec = opus_embedded::Decoder::init_in(slot, s, c)
+            .map_err(|e| anyhow::anyhow!("making opus decoder: {e}"))?;
+        Ok(Decoder::Opus(OpusDecoder(dec)))
     }
 }
 
 #[enum_dispatch]
-pub trait Decode {
+pub trait Decode<'a> {
     /// Returns total number of samples
     fn decode_sample(&mut self, buf: &[u8], out: &mut [i16]) -> Result<usize, anyhow::Error>;
 }
 
 #[cfg(feature = "opus")]
-impl Decode for Box<opus_embedded::Decoder> {
+impl<'a> Decode<'a> for OpusDecoder<'a> {
     fn decode_sample(&mut self, buf: &[u8], out: &mut [i16]) -> Result<usize, anyhow::Error> {
         // TODO: fec?
-        Ok(self.decode(buf, out).context("decode")?.len())
+        Ok(self.0.decode(buf, out).context("decode")?.len())
     }
 }
 
 pub struct NoOpDecoder;
 
-impl Decode for NoOpDecoder {
+impl<'a> Decode<'a> for NoOpDecoder {
     fn decode_sample(&mut self, buf: &[u8], out: &mut [i16]) -> Result<usize, anyhow::Error> {
         // SAFETY: This is safe by design - a no-op decoder passes the data through as-is
         let (_, converted, _) = unsafe { buf.align_to::<i16>() };
@@ -96,7 +93,7 @@ impl FlacDecoder {
 }
 
 #[cfg(feature = "flac")]
-impl Decode for FlacDecoder {
+impl<'a> Decode<'a> for FlacDecoder {
     fn decode_sample(&mut self, buf: &[u8], out: &mut [i16]) -> Result<usize, anyhow::Error> {
         let mut fr = FrameReader::new(std::io::Cursor::new(buf));
         let mut c = 0;

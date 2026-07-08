@@ -9,7 +9,7 @@ use playback::Alsa;
 #[cfg(feature = "pulse")]
 use playback::Pulse;
 use playback::{File, Player, Players, Tcp};
-use proto::{CodecHeader, TimeVal};
+use proto::{CodecHeader, CodecMetadata, TimeVal};
 
 use clap::Parser;
 use decoder::{Decode, Decoder};
@@ -53,7 +53,18 @@ fn main() -> anyhow::Result<()> {
         let msg = client.tick()?;
         match msg {
             Message::CodecHeader(ch) => {
-                _ = dec_2.lock().unwrap().insert(Decoder::new(&ch)?);
+                #[allow(unreachable_patterns)]
+                let d = match &ch.metadata {
+                    CodecMetadata::Pcm(_) => Decoder::new_pcm(),
+                    #[cfg(feature = "flac")]
+                    CodecMetadata::Flac(_) => Decoder::new_flac(),
+                    #[cfg(feature = "opus")]
+                    CodecMetadata::Opus(cfg) => {
+                        Decoder::new_opus(cfg, Box::leak(Box::new_uninit()))?
+                    }
+                    other => anyhow::bail!("codec disabled at build time: {other:?}"),
+                };
+                _ = dec_2.lock().unwrap().insert(d);
                 let p = make_player(args.backend, &ch)?;
                 _ = player_2.lock().unwrap().insert(p);
             }
