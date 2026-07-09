@@ -38,7 +38,3 @@ claxon = { git = "https://github.com/DavidVentura/claxon.git", optional = true, 
 
 [lib]
 src = "src/lib.rs"
-
-[[bin]]
-name = "server"
-#src = "src/bin/server.rs"

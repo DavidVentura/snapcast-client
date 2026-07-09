@@ -1,6 +1,8 @@
 use crate::proto::{
     Base, ClientHello, CodecHeader, ServerMessage, ServerSettings, Time, TimeVal, WireChunk,
 };
+pub use crate::framing::{Action, Event};
+use crate::framing::Framing;
 use circular_buffer::CircularBuffer;
 use std::io::prelude::*;
 use std::net::{TcpStream, ToSocketAddrs};
@@ -15,28 +17,13 @@ pub enum Message<'a> {
     CodecHeader(CodecHeader<'a>),
 }
 
-pub enum Action {
-    ReadHeader,
-    ReadPacket(u32),
-}
-
-pub enum Event<'a> {
-    HeaderReceived(&'a [u8]),
-    PacketReceived(&'a [u8]),
-}
-
-enum FramingState {
-    ReadingHeader,
-    ReadingPacket(Base),
-}
-
 const LATENCY_SAMPLES: usize = 20;
 
 /// Socket-free snapclient protocol core. It never reads or writes bytes; the
 /// caller drives it by feeding `Event`s (satisfying the requested `next_action`)
 /// and draining `poll_transmit`, injecting a monotonic `now_us` for every step.
 pub struct ClientMachine {
-    state: FramingState,
+    framing: Framing,
     latency_buf: CircularBuffer<LATENCY_SAMPLES, TimeVal>,
     sorted_latency_buf: Vec<TimeVal>,
     pkt_id: u16,
@@ -60,7 +47,7 @@ impl ClientMachine {
     pub fn new() -> ClientMachine {
         let tv_zero = TimeVal { sec: 0, usec: 0 };
         ClientMachine {
-            state: FramingState::ReadingHeader,
+            framing: Framing::new(),
             latency_buf: CircularBuffer::new(),
             sorted_latency_buf: vec![tv_zero; LATENCY_SAMPLES],
             pkt_id: 0,
@@ -88,10 +75,7 @@ impl ClientMachine {
     }
 
     pub fn next_action(&self) -> Action {
-        match &self.state {
-            FramingState::ReadingHeader => Action::ReadHeader,
-            FramingState::ReadingPacket(base) => Action::ReadPacket(base.size),
-        }
+        self.framing.next_action()
     }
 
     /// Emit a timer-driven Time request into `out` when one is due, returning its
@@ -114,16 +98,11 @@ impl ClientMachine {
     pub fn handle_event<'a>(&mut self, event: Event<'a>, now_us: i64) -> Message<'a> {
         match event {
             Event::HeaderReceived(bytes) => {
-                self.state = FramingState::ReadingPacket(Base::from(bytes));
+                self.framing.on_header(bytes);
                 Message::Nothing
             }
             Event::PacketReceived(bytes) => {
-                let base = match std::mem::replace(&mut self.state, FramingState::ReadingHeader) {
-                    FramingState::ReadingPacket(base) => base,
-                    FramingState::ReadingHeader => {
-                        panic!("PacketReceived without a pending header")
-                    }
-                };
+                let base = self.framing.take_base();
                 self.process_packet(base, bytes, now_us)
             }
         }

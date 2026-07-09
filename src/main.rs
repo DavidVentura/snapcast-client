@@ -1,5 +1,6 @@
 mod client;
 mod decoder;
+mod framing;
 mod playback;
 mod proto;
 
