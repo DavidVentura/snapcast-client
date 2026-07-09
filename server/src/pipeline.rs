@@ -78,6 +78,21 @@ impl Pipeline {
         })
     }
 
+    /// Pad the trailing partial opus frame with silence and emit it, so the tail
+    /// of a track is not swallowed when the source stops.
+    pub fn flush_with_silence(&mut self) -> anyhow::Result<()> {
+        let rem = self.out_l.len() % self.frame;
+        if rem != 0 {
+            let pad = self.frame - rem;
+            self.out_l.resize(self.out_l.len() + pad, 0.0);
+            self.out_r.resize(self.out_r.len() + pad, 0.0);
+        }
+        while self.out_l.len() >= self.frame {
+            self.emit_frame()?;
+        }
+        Ok(())
+    }
+
     /// Restart the clock anchor and drop any partially accumulated audio.
     pub fn reanchor(&mut self) {
         self.t0_us = None;

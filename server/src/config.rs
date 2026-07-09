@@ -4,6 +4,8 @@ use std::path::PathBuf;
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
 pub enum Source {
+    /// Embedded librespot; appears as a Spotify Connect device.
+    Spotify,
     /// A synthetic sine tone, useful for exercising the pipeline without Spotify.
     Sine,
 }
@@ -36,6 +38,6 @@ pub struct Config {
     pub cache_dir: PathBuf,
 
     /// Audio source feeding the pipeline.
-    #[arg(long, value_enum, default_value_t = Source::Sine)]
+    #[arg(long, value_enum, default_value_t = Source::Spotify)]
     pub source: Source,
 }

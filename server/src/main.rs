@@ -1,7 +1,9 @@
 mod config;
 mod net;
 mod pipeline;
+mod sink;
 mod source;
+mod spotify;
 
 use std::net::TcpListener;
 use std::sync::Arc;
@@ -36,9 +38,19 @@ fn main() -> anyhow::Result<()> {
         std::thread::spawn(move || net::accept_loop(listener, registry, clock));
     }
 
-    let pipeline = Pipeline::new(clock, registry.clone(), config.chunk_ms, config.opus_bitrate)?;
     match config.source {
-        Source::Sine => source::run_sine(pipeline)?,
+        Source::Sine => {
+            let pipeline =
+                Pipeline::new(clock, registry.clone(), config.chunk_ms, config.opus_bitrate)?;
+            source::run_sine(pipeline)?;
+        }
+        Source::Spotify => {
+            // librespot needs an async runtime; the snapcast side stays threaded
+            let rt = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()?;
+            rt.block_on(spotify::run(&config, clock, registry.clone()))?;
+        }
     }
     Ok(())
 }
