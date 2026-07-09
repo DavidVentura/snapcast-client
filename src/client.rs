@@ -3,6 +3,7 @@ use crate::proto::{
 };
 pub use crate::framing::{Action, Event};
 use crate::framing::Framing;
+use anyhow::Context;
 use circular_buffer::CircularBuffer;
 use std::io::prelude::*;
 use std::net::{TcpStream, ToSocketAddrs};
@@ -188,6 +189,10 @@ impl ConnectedClient {
             Err(e) => log::error!("Failed to set nodelay on connection: {:?}", e),
         }
         conn.set_read_timeout(Some(Duration::from_secs(1)))?;
+        // Without a write timeout a stalled network (e.g. WiFi dropping) makes the
+        // next Time-request write_all block forever, wedging the whole client with
+        // no error and no recovery. Time out so it surfaces as a dropped connection.
+        conn.set_write_timeout(Some(Duration::from_secs(3)))?;
         Ok(ConnectedClient {
             conn,
             time_base: Instant::now(),
@@ -218,7 +223,9 @@ impl ConnectedClient {
     pub fn tick(&mut self) -> anyhow::Result<Message<'_>> {
         let tx_now = self.now_us();
         while let Some(n) = self.machine.poll_transmit(tx_now, &mut self.tx_buf) {
-            self.conn.write_all(&self.tx_buf[..n])?;
+            self.conn
+                .write_all(&self.tx_buf[..n])
+                .context("writing time request")?;
         }
 
         loop {
