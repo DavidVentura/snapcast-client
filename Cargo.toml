@@ -35,6 +35,3 @@ simple-mdns = {version = "0.6.2", features = ["sync"]}
 simple-dns = "0.7.0"
 log = "0.4.21"
 claxon = { git = "https://github.com/DavidVentura/claxon.git", optional = true, branch = "borrow-api" }
-
-[lib]
-src = "src/lib.rs"
