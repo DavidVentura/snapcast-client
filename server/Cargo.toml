@@ -17,3 +17,4 @@ librespot = { version = "0.8", default-features = false, features = [
 ] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
 futures = "0.3"
+mdns-sd = "0.20"

@@ -5,6 +5,8 @@ use std::sync::mpsc::{sync_channel, Receiver, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use mdns_sd::{ServiceDaemon, ServiceInfo};
+
 use snapcast_client::framing::{Action, Event};
 use snapcast_client::proto::{
     Base, CodecHeader, CodecMetadata, OpusMetadata, ServerSettings, Time, TimeVal, WireChunk,
@@ -185,6 +187,26 @@ fn opus_codec_header() -> CodecHeader<'static> {
             channel_count: 2,
         }),
     }
+}
+
+/// Advertise the stream port over mDNS as `_snapcast._tcp` so clients can find us
+/// without a hardcoded address. The returned daemon must be kept alive; dropping
+/// it withdraws the advertisement.
+pub fn advertise(device_name: &str, port: u16) -> anyhow::Result<ServiceDaemon> {
+    let mdns = ServiceDaemon::new()?;
+    let host = format!("{}.local.", device_name.replace(' ', "-"));
+    let service = ServiceInfo::new(
+        "_snapcast._tcp.local.",
+        device_name,
+        &host,
+        "",
+        port,
+        &[] as &[(&str, &str)],
+    )?
+    .enable_addr_auto();
+    mdns.register(service)?;
+    log::info!("advertising _snapcast._tcp on port {port} as '{device_name}'");
+    Ok(mdns)
 }
 
 pub fn accept_loop(listener: TcpListener, registry: Arc<Registry>, clock: ServerClock) {

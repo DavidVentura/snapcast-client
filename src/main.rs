@@ -1,6 +1,7 @@
 mod client;
 mod decoder;
 mod framing;
+mod mdns;
 mod playback;
 mod proto;
 
@@ -33,15 +34,24 @@ struct Args {
     #[arg(short, long, value_enum)]
     backend: PlayerBackend,
 
-    #[arg(short, long, default_value = "192.168.2.183:1704")]
-    server: String,
+    /// Server address; if omitted, discovered over mDNS (_snapcast._tcp).
+    #[arg(short, long)]
+    server: Option<String>,
 }
 
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
+    let server = match args.server {
+        Some(s) => s,
+        None => mdns::discover("_snapcast._tcp.local", time::Duration::from_secs(3))?
+            .ok_or_else(|| anyhow::anyhow!("no _snapcast._tcp server found on the network"))?
+            .to_string(),
+    };
+    println!("connecting to {server}");
+
     let client = Client::new("11:22:33:44:55:66".into(), "framework".into());
-    let mut client = client.connect(args.server.as_str())?;
+    let mut client = client.connect(server.as_str())?;
     let time_base_c = client.time_base();
 
     let dec: Arc<Mutex<Option<Decoder>>> = Arc::new(Mutex::new(None));

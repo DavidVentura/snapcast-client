@@ -33,6 +33,8 @@ fn main() -> anyhow::Result<()> {
 
     let listener = TcpListener::bind(config.bind)?;
     log::info!("listening on {}", config.bind);
+    // keep the mDNS advertisement alive for the whole process
+    let _mdns = net::advertise(&config.device_name, config.bind.port())?;
     {
         let registry = registry.clone();
         std::thread::spawn(move || net::accept_loop(listener, registry, clock));
