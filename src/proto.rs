@@ -166,8 +166,8 @@ impl From<u16> for MessageType {
 #[derive(Debug, PartialEq)]
 pub struct Base {
     mtype: MessageType,
-    id: u16,
-    refers_to: u16,
+    pub(crate) id: u16,
+    pub(crate) refers_to: u16,
     pub(crate) sent_tv: TimeVal,
     pub(crate) received_tv: TimeVal,
     pub size: u32,
@@ -321,18 +321,20 @@ impl Base {
         }
     }
 
-    fn as_buf(&self, payload: &[u8]) -> Vec<u8> {
-        let mut buf = Vec::with_capacity(payload.len() + Base::BASE_SIZE);
+    fn write(&self, out: &mut [u8], payload: &[u8]) -> usize {
+        out[0..2].copy_from_slice(&u16::to_le_bytes(self.mtype as u16));
+        out[2..4].copy_from_slice(&u16::to_le_bytes(self.id));
+        out[4..6].copy_from_slice(&u16::to_le_bytes(self.refers_to));
+        self.sent_tv.write(&mut out[6..14]);
+        self.received_tv.write(&mut out[14..22]);
+        out[22..26].copy_from_slice(&u32::to_le_bytes(self.size));
+        out[Base::BASE_SIZE..Base::BASE_SIZE + payload.len()].copy_from_slice(payload);
+        Base::BASE_SIZE + payload.len()
+    }
 
-        buf.extend(u16::to_le_bytes(self.mtype as u16));
-        buf.extend(u16::to_le_bytes(self.id));
-        buf.extend(u16::to_le_bytes(self.refers_to));
-        buf.extend(i32::to_le_bytes(self.sent_tv.sec));
-        buf.extend(i32::to_le_bytes(self.sent_tv.usec));
-        buf.extend(i32::to_le_bytes(self.received_tv.sec));
-        buf.extend(i32::to_le_bytes(self.received_tv.usec));
-        buf.extend(u32::to_le_bytes(self.size));
-        buf.extend(payload);
+    fn as_buf(&self, payload: &[u8]) -> Vec<u8> {
+        let mut buf = vec![0; Base::BASE_SIZE + payload.len()];
+        self.write(&mut buf, payload);
         buf
     }
 }
@@ -340,6 +342,9 @@ impl Base {
 impl Time {
     // TODO: this should be a TimeReq which is mut
     // to prevent these stupid 8 byte allocations (latency)
+    /// Wire size of a Time message: 26-byte Base header + 8-byte latency payload.
+    pub const WIRE_SIZE: usize = Base::BASE_SIZE + 8;
+
     pub fn as_buf(
         id: u16,
         refers_to: u16,
@@ -347,7 +352,21 @@ impl Time {
         received_tv: TimeVal,
         latency: TimeVal,
     ) -> Vec<u8> {
-        let payload = latency.as_buf();
+        let mut buf = vec![0; Time::WIRE_SIZE];
+        Time::write(&mut buf, id, refers_to, sent_tv, received_tv, latency);
+        buf
+    }
+
+    pub fn write(
+        out: &mut [u8],
+        id: u16,
+        refers_to: u16,
+        sent_tv: TimeVal,
+        received_tv: TimeVal,
+        latency: TimeVal,
+    ) -> usize {
+        let mut payload = [0u8; 8];
+        latency.write(&mut payload);
         Base {
             mtype: MessageType::Time,
             id,
@@ -356,7 +375,7 @@ impl Time {
             received_tv,
             size: payload.len() as u32,
         }
-        .as_buf(&payload)
+        .write(out, &payload)
     }
 }
 
