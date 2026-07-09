@@ -11,6 +11,19 @@ pub struct TimeVal {
 }
 
 impl TimeVal {
+    pub fn write(&self, buf: &mut [u8]) {
+        buf[0..4].copy_from_slice(&i32::to_le_bytes(self.sec));
+        buf[4..8].copy_from_slice(&i32::to_le_bytes(self.usec));
+    }
+    pub fn from_micros(us: i64) -> TimeVal {
+        TimeVal {
+            sec: (us / 1_000_000) as i32,
+            usec: (us % 1_000_000) as i32,
+        }
+    }
+    pub fn to_micros(&self) -> i64 {
+        self.sec as i64 * 1_000_000 + self.usec as i64
+    }
     pub fn as_buf(&self) -> Vec<u8> {
         let mut v = Vec::with_capacity(8);
         v.extend_from_slice(&i32::to_le_bytes(self.sec));
@@ -189,18 +202,38 @@ impl<'a> From<&'a [u8]> for CodecHeader<'a> {
         CodecHeader { codec, metadata }
     }
 }
+impl CodecHeader<'_> {
+    pub fn as_buf(&self, id: u16, now: TimeVal) -> Vec<u8> {
+        let codec = self.codec.as_bytes();
+        let meta = self.metadata.as_payload();
+        let mut payload = Vec::with_capacity(8 + codec.len() + meta.len());
+        payload.extend_from_slice(&u32::to_le_bytes(codec.len() as u32));
+        payload.extend_from_slice(codec);
+        payload.extend_from_slice(&u32::to_le_bytes(meta.len() as u32));
+        payload.extend_from_slice(&meta);
+        Base {
+            mtype: MessageType::CodecHeader,
+            id,
+            refers_to: 0,
+            sent_tv: now,
+            received_tv: now,
+            size: payload.len() as u32,
+        }
+        .as_buf(&payload)
+    }
+}
 impl ServerSettings {
-    pub fn as_buf(&self) -> Vec<u8> {
+    pub fn as_buf(&self, id: u16, now: TimeVal) -> Vec<u8> {
         let s = serde_json::to_string(self).unwrap();
         let payload = s.into_bytes();
         let mut payload_len_buf = u32::to_le_bytes(payload.len() as u32).to_vec();
         payload_len_buf.extend_from_slice(&payload);
         Base {
             mtype: MessageType::ServerSettings,
-            id: 0,
+            id,
             refers_to: 0,
-            sent_tv: TimeVal { sec: 0, usec: 0 },
-            received_tv: TimeVal { sec: 0, usec: 0 },
+            sent_tv: now,
+            received_tv: now,
             size: payload_len_buf.len() as u32,
         }
         .as_buf(&payload_len_buf)
@@ -215,14 +248,16 @@ impl<'a> From<&'a [u8]> for ServerSettings {
 }
 
 impl WireChunk<'_> {
-    pub fn as_buf(&self) -> Vec<u8> {
-        let payload = [&self.timestamp.as_buf(), self.payload].concat();
+    pub fn as_buf(&self, id: u16, now: TimeVal) -> Vec<u8> {
+        let mut payload = self.timestamp.as_buf();
+        payload.extend_from_slice(&u32::to_le_bytes(self.payload.len() as u32));
+        payload.extend_from_slice(self.payload);
         Base {
             mtype: MessageType::WireChunk,
-            id: 0,
+            id,
             refers_to: 0,
-            sent_tv: TimeVal { sec: 0, usec: 0 },
-            received_tv: TimeVal { sec: 0, usec: 0 },
+            sent_tv: now,
+            received_tv: now,
             size: payload.len() as u32,
         }
         .as_buf(&payload)
@@ -305,12 +340,18 @@ impl Base {
 impl Time {
     // TODO: this should be a TimeReq which is mut
     // to prevent these stupid 8 byte allocations (latency)
-    pub fn as_buf(id: u16, sent_tv: TimeVal, received_tv: TimeVal, latency: TimeVal) -> Vec<u8> {
+    pub fn as_buf(
+        id: u16,
+        refers_to: u16,
+        sent_tv: TimeVal,
+        received_tv: TimeVal,
+        latency: TimeVal,
+    ) -> Vec<u8> {
         let payload = latency.as_buf();
         Base {
             mtype: MessageType::Time,
             id,
-            refers_to: 0,
+            refers_to,
             sent_tv,
             received_tv,
             size: payload.len() as u32,
@@ -352,6 +393,21 @@ pub struct OpusMetadata {
     pub sample_rate: u32,
     pub bit_depth: u16,
     pub channel_count: u16,
+}
+
+// snapcast's opus pseudo-header magic, 'OPUS' read as a little-endian u32; only
+// official snapclient validates it, the ESP decoder discards the marker
+pub const OPUS_MARKER: u32 = 0x4F50_5553;
+
+impl OpusMetadata {
+    pub fn as_payload(&self) -> [u8; 12] {
+        let mut b = [0u8; 12];
+        b[0..4].copy_from_slice(&u32::to_le_bytes(OPUS_MARKER));
+        b[4..8].copy_from_slice(&u32::to_le_bytes(self.sample_rate));
+        b[8..10].copy_from_slice(&u16::to_le_bytes(self.bit_depth));
+        b[10..12].copy_from_slice(&u16::to_le_bytes(self.channel_count));
+        b
+    }
 }
 
 impl From<&[u8]> for OpusMetadata {
@@ -435,6 +491,14 @@ impl CodecMetadata {
             CodecMetadata::Opus(o) => o.sample_rate as usize,
             CodecMetadata::Pcm(p) => p.audio_rate as usize,
             CodecMetadata::Flac(f) => f.sample_rate as usize,
+        }
+    }
+    fn as_payload(&self) -> Vec<u8> {
+        match self {
+            CodecMetadata::Opus(o) => o.as_payload().to_vec(),
+            // the server only ever emits opus; pcm/flac headers are decode-only
+            CodecMetadata::Pcm(_) => todo!("encoding pcm codec header"),
+            CodecMetadata::Flac(_) => todo!("encoding flac codec header"),
         }
     }
 }
@@ -635,5 +699,133 @@ mod tests {
             22, 0, 0,
         ];
         assert_eq!(Base::from(buf_wc.as_slice()), exp_wc);
+    }
+
+    fn split(buf: &[u8]) -> (Base, &[u8]) {
+        (Base::from(&buf[0..Base::BASE_SIZE]), &buf[Base::BASE_SIZE..])
+    }
+
+    #[test]
+    fn roundtrip_client_hello() {
+        let hello = ClientHello {
+            MAC: "11:22:33:44:55:66",
+            HostName: "framework",
+            Version: "0.17.1",
+            ClientName: "CoolClient",
+            OS: "linux",
+            Arch: "x86_64",
+            Instance: 1,
+            ID: "11:22:33:44:55:66",
+            SnapStreamProtocolVersion: 2,
+        };
+        let buf = hello.as_buf();
+        let (base, payload) = split(&buf);
+        assert_eq!(base.mtype, MessageType::Hello);
+        match base.decode_c(payload) {
+            ClientMessage::Hello(h) => assert_eq!(h, hello),
+            other => panic!("expected Hello, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn roundtrip_time_both_roles() {
+        let sent = TimeVal {
+            sec: 12,
+            usec: 345,
+        };
+        let received = TimeVal {
+            sec: 67,
+            usec: 890,
+        };
+        let latency = TimeVal {
+            sec: 1,
+            usec: 500,
+        };
+
+        // client role: refers_to == 0
+        let buf = Time::as_buf(7, 0, sent, received, latency);
+        let (base, payload) = split(&buf);
+        assert_eq!(base.id, 7);
+        assert_eq!(base.refers_to, 0);
+        assert_eq!(base.sent_tv, sent);
+        assert_eq!(base.received_tv, received);
+        assert_eq!(base.decode(payload), ServerMessage::Time(Time { latency }));
+
+        // server role: refers_to echoes the request id
+        let buf = Time::as_buf(5, 42, sent, received, latency);
+        let (base, payload) = split(&buf);
+        assert_eq!(base.id, 5);
+        assert_eq!(base.refers_to, 42);
+        assert_eq!(base.sent_tv, sent);
+        assert_eq!(base.received_tv, received);
+        assert_eq!(base.decode_c(payload), ClientMessage::Time(Time { latency }));
+    }
+
+    #[test]
+    fn roundtrip_server_settings() {
+        let now = TimeVal {
+            sec: 100,
+            usec: 200,
+        };
+        let ss = ServerSettings {
+            bufferMs: 2000,
+            latency: 0,
+            muted: false,
+            volume: 42,
+        };
+        let buf = ss.as_buf(3, now);
+        let (base, payload) = split(&buf);
+        assert_eq!(base.id, 3);
+        assert_eq!(base.sent_tv, now);
+        assert_eq!(base.decode(payload), ServerMessage::ServerSettings(ss));
+    }
+
+    #[test]
+    fn roundtrip_codec_header_opus() {
+        let now = TimeVal {
+            sec: 9,
+            usec: 8765,
+        };
+        let ch = CodecHeader {
+            codec: "opus",
+            metadata: CodecMetadata::Opus(OpusMetadata {
+                sample_rate: 48_000,
+                bit_depth: 16,
+                channel_count: 2,
+            }),
+        };
+        let buf = ch.as_buf(1, now);
+        let (base, payload) = split(&buf);
+        assert_eq!(base.id, 1);
+        assert_eq!(base.sent_tv, now);
+        assert_eq!(base.decode(payload), ServerMessage::CodecHeader(ch));
+    }
+
+    #[test]
+    fn roundtrip_wire_chunk() {
+        let now = TimeVal {
+            sec: 55,
+            usec: 66,
+        };
+        let ts = TimeVal {
+            sec: 1000,
+            usec: 2000,
+        };
+        let data: Vec<u8> = (0..200).map(|i| i as u8).collect();
+        let wc = WireChunk {
+            timestamp: ts,
+            payload: &data,
+        };
+        let buf = wc.as_buf(9, now);
+        let (base, payload) = split(&buf);
+        assert_eq!(base.id, 9);
+        assert_eq!(base.sent_tv, now);
+        match base.decode(payload) {
+            ServerMessage::WireChunk(got) => {
+                assert_eq!(got.timestamp, ts);
+                assert_eq!(got.payload, data.as_slice());
+            }
+            other => panic!("expected WireChunk, got {other:?}"),
+        }
     }
 }

@@ -88,7 +88,7 @@ impl ConnectedClient {
             usec: now.subsec_micros() as i32,
         };
         self.last_sent_time = tv;
-        let t = Time::as_buf(self.pkt_id as u16, tv, tv, tv);
+        let t = Time::as_buf(self.pkt_id as u16, 0, tv, tv, tv);
         self.pkt_id += 1;
         self.conn.write_all(&t)?;
         Ok(())

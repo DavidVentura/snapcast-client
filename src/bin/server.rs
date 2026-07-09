@@ -21,7 +21,7 @@ fn handle_client(mut s: TcpStream) -> anyhow::Result<()> {
                 timestamp: now,
                 payload: &payload,
             }
-            .as_buf();
+            .as_buf(0, now);
             send_fd.write_all(&buf).unwrap();
         }
     });
@@ -39,12 +39,12 @@ fn handle_client(mut s: TcpStream) -> anyhow::Result<()> {
                 muted: false,
                 volume: 100,
             }
-            .as_buf(),
+            .as_buf(0, recv_ts),
             ClientMessage::Time(_t) => {
                 let now = std::time::SystemTime::now();
                 let now = TimeVal::from(now.duration_since(UNIX_EPOCH)?);
                 // ???
-                let t = Time::as_buf(timecount, now, recv_ts, now);
+                let t = Time::as_buf(timecount, 0, now, recv_ts, now);
                 timecount = timecount.wrapping_add(1);
                 t
             }
