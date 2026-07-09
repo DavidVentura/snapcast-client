@@ -32,13 +32,16 @@ enum PlayerBackend {
 struct Args {
     #[arg(short, long, value_enum)]
     backend: PlayerBackend,
+
+    #[arg(short, long, default_value = "192.168.2.183:1704")]
+    server: String,
 }
 
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
     let client = Client::new("11:22:33:44:55:66".into(), "framework".into());
-    let mut client = client.connect("192.168.2.183:1704")?;
+    let mut client = client.connect(args.server.as_str())?;
     let time_base_c = client.time_base();
 
     let dec: Arc<Mutex<Option<Decoder>>> = Arc::new(Mutex::new(None));
@@ -51,6 +54,7 @@ fn main() -> anyhow::Result<()> {
     std::thread::spawn(move || handle_samples(sample_rx, time_base_c, player, dec));
 
     loop {
+        let in_sync = client.synchronized();
         let msg = client.tick()?;
         match msg {
             Message::CodecHeader(ch) => {
@@ -70,7 +74,12 @@ fn main() -> anyhow::Result<()> {
                 _ = player_2.lock().unwrap().insert(p);
             }
             Message::WireChunk(wc, audible_at) => {
-                sample_tx.send((audible_at, wc.payload.to_vec()))?;
+                // before the offset buffer fills, audible_at is computed from a
+                // bogus clock offset; forwarding those would schedule playback
+                // wildly in the future
+                if in_sync {
+                    sample_tx.send((audible_at, wc.payload.to_vec()))?;
+                }
             }
 
             Message::ServerSettings(_v) => {
@@ -94,23 +103,17 @@ fn handle_samples(
 
     let mut player_lat_ms: u16 = 1;
     while let Ok((client_audible_ts, samples)) = sample_rx.recv() {
-        let mut valid = true;
-        loop {
-            let remaining = client_audible_ts - time_base_c.elapsed().into();
-            if remaining.sec < 0 {
-                valid = false;
-                break;
-            }
-
-            if remaining.millis().unwrap() <= player_lat_ms {
-                break;
-            }
-            std::thread::sleep(time::Duration::from_millis(1));
-        }
-
-        if !valid {
+        let remaining = client_audible_ts - time_base_c.elapsed().into();
+        if remaining.sec < 0 {
             println!("aaa in the past");
             continue;
+        }
+
+        // sleep until the chunk is due, leaving the player's own latency of lead
+        let remaining_us = remaining.to_micros();
+        let lead_us = player_lat_ms as i64 * 1000;
+        if remaining_us > lead_us {
+            std::thread::sleep(time::Duration::from_micros((remaining_us - lead_us) as u64));
         }
 
         // Guard against chunks coming before the decoder is initialized

@@ -398,7 +398,7 @@ impl<'a> ClientHello<'a> {
     }
 }
 
-#[derive(Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[allow(non_snake_case)]
 pub struct ServerSettings {
     pub bufferMs: u32,
