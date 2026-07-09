@@ -1,0 +1,8 @@
+[package]
+name = "snapcast-server"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+snapcast-client = { path = "..", default-features = false }
+anyhow = "1.0.81"

@@ -1,3 +1,7 @@
+[workspace]
+members = ["server"]
+resolver = "2"
+
 [package]
 name = "snapcast-client"
 version = "0.1.0"
@@ -6,11 +10,13 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-default = ["opus"]
-pulse = ["dep:libpulse-binding", "libpulse-simple-binding"]
-alsa = ["dep:alsa"]
-opus = ["dep:opus-embedded"]
-flac = ["dep:claxon"]
+default = ["opus", "playback"]
+decoder = []
+playback = []
+pulse = ["playback", "dep:libpulse-binding", "libpulse-simple-binding"]
+alsa = ["playback", "dep:alsa"]
+opus = ["decoder", "dep:opus-embedded"]
+flac = ["decoder", "dep:claxon"]
 
 [dependencies]
 anyhow = "1.0.81"

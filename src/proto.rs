@@ -494,9 +494,10 @@ mod tests {
             usec: 384503,
         };
         let tv2 = TimeVal::from(Duration::from_secs(3514) + Duration::from_micros(743652));
+        // -359149us, normalized: borrows one second (-1s + 640851us)
         let expected = TimeVal {
-            sec: 0,
-            usec: -359149,
+            sec: -1,
+            usec: 640851,
         };
 
         assert_eq!((tv1 - tv2).normalize(), expected);
