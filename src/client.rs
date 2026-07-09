@@ -95,11 +95,15 @@ impl ClientMachine {
         Some(n)
     }
 
-    pub fn handle_event<'a>(&mut self, event: Event<'a>, now_us: i64) -> Message<'a> {
+    pub fn handle_event<'a>(
+        &mut self,
+        event: Event<'a>,
+        now_us: i64,
+    ) -> anyhow::Result<Message<'a>> {
         match event {
             Event::HeaderReceived(bytes) => {
-                self.framing.on_header(bytes);
-                Message::Nothing
+                self.framing.on_header(bytes)?;
+                Ok(Message::Nothing)
             }
             Event::PacketReceived(bytes) => {
                 let base = self.framing.take_base();
@@ -108,9 +112,14 @@ impl ClientMachine {
         }
     }
 
-    fn process_packet<'a>(&mut self, base: Base, payload: &'a [u8], now_us: i64) -> Message<'a> {
+    fn process_packet<'a>(
+        &mut self,
+        base: Base,
+        payload: &'a [u8],
+        now_us: i64,
+    ) -> anyhow::Result<Message<'a>> {
         let recv_ts = TimeVal::from_micros(now_us);
-        match base.decode(payload) {
+        Ok(match base.decode(payload)? {
             ServerMessage::Time(_) => {
                 // c2s = clock_offset + uplink_delay; s2c = -clock_offset + downlink_delay
                 // their difference cancels the (symmetric) network delay, leaving the
@@ -141,7 +150,7 @@ impl ClientMachine {
                     // deliberately silent: printing here (blocking UART on embedded)
                     // makes drop-processing slower than the chunk rate, so a client
                     // that falls behind can never catch up; the caller rate-limits
-                    return Message::Expired(cmp);
+                    return Ok(Message::Expired(cmp));
                 }
 
                 Message::WireChunk(wc, audible_at)
@@ -152,7 +161,7 @@ impl ClientMachine {
                 Message::ServerSettings(s)
             }
             ServerMessage::CodecHeader(ch) => Message::CodecHeader(ch),
-        }
+        })
     }
 }
 
@@ -218,7 +227,7 @@ impl ConnectedClient {
                     Ok(()) => {
                         let ev = Event::HeaderReceived(&self.hdr_buf);
                         // returns Nothing and transitions to ReadPacket; loop to read it
-                        let _ = self.machine.handle_event(ev, tx_now);
+                        self.machine.handle_event(ev, tx_now)?;
                     }
                     Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                         return Ok(Message::Nothing);
@@ -236,7 +245,7 @@ impl ConnectedClient {
                         Ok(()) => {
                             let rx_now = self.now_us();
                             let ev = Event::PacketReceived(&self.pkt_buf[0..size]);
-                            return Ok(self.machine.handle_event(ev, rx_now));
+                            return self.machine.handle_event(ev, rx_now);
                         }
                         Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                             return Ok(Message::Nothing);
@@ -289,9 +298,9 @@ mod tests {
         // 1ms in, unsynchronized: a request is due
         let n = m.poll_transmit(1_000, &mut buf).unwrap();
         assert_eq!(n, Time::WIRE_SIZE);
-        let base = Base::from(&buf[0..Base::BASE_SIZE]);
+        let base = Base::try_from(&buf[0..Base::BASE_SIZE]).unwrap();
         assert_eq!(base.id, 0);
-        match base.decode_c(&buf[Base::BASE_SIZE..n]) {
+        match base.decode_c(&buf[Base::BASE_SIZE..n]).unwrap() {
             ClientMessage::Time(_) => {}
             other => panic!("expected Time, got {other:?}"),
         }
@@ -303,7 +312,7 @@ mod tests {
 
         // 1ms after the last one, the next request increments pkt_id
         let n = m.poll_transmit(2_000, &mut buf).unwrap();
-        let base = Base::from(&buf[0..Base::BASE_SIZE]);
+        let base = Base::try_from(&buf[0..Base::BASE_SIZE]).unwrap();
         assert_eq!(base.id, 1);
         assert_eq!(n, Time::WIRE_SIZE);
     }
@@ -319,8 +328,9 @@ mod tests {
         let server_t = TimeVal::from_micros(s_us + offset_us + delay_us);
         let reply = Time::as_buf(0, 0, server_t, server_t, TimeVal { sec: 0, usec: 0 });
         let (hdr, payload) = reply.split_at(Base::BASE_SIZE);
-        m.handle_event(Event::HeaderReceived(hdr), 0);
-        m.handle_event(Event::PacketReceived(payload), s_us + 2 * delay_us);
+        m.handle_event(Event::HeaderReceived(hdr), 0).unwrap();
+        m.handle_event(Event::PacketReceived(payload), s_us + 2 * delay_us)
+            .unwrap();
     }
 
     #[test]
@@ -344,8 +354,8 @@ mod tests {
         let buf: &'static [u8] =
             Box::leak(wc.as_buf(0, TimeVal { sec: 0, usec: 0 }).into_boxed_slice());
         let (hdr, payload) = buf.split_at(Base::BASE_SIZE);
-        m.handle_event(Event::HeaderReceived(hdr), 0);
-        m.handle_event(Event::PacketReceived(payload), now_us)
+        m.handle_event(Event::HeaderReceived(hdr), 0).unwrap();
+        m.handle_event(Event::PacketReceived(payload), now_us).unwrap()
     }
 
     #[test]
@@ -360,8 +370,8 @@ mod tests {
         };
         let buf = ss.as_buf(0, TimeVal { sec: 0, usec: 0 });
         let (hdr, payload) = buf.split_at(Base::BASE_SIZE);
-        m.handle_event(Event::HeaderReceived(hdr), 0);
-        m.handle_event(Event::PacketReceived(payload), 0);
+        m.handle_event(Event::HeaderReceived(hdr), 0).unwrap();
+        m.handle_event(Event::PacketReceived(payload), 0).unwrap();
 
         // a chunk timestamped 1s out, received now, is audible in the future
         match feed_wire_chunk(&mut m, TimeVal::from_micros(1_000_000), 0) {

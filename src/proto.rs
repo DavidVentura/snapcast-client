@@ -148,9 +148,10 @@ pub enum ServerMessage<'a> {
     Time(Time),
 }
 
-impl From<u16> for MessageType {
-    fn from(u: u16) -> MessageType {
-        match u {
+impl TryFrom<u16> for MessageType {
+    type Error = anyhow::Error;
+    fn try_from(u: u16) -> anyhow::Result<MessageType> {
+        Ok(match u {
             0 => MessageType::Base,
             1 => MessageType::CodecHeader,
             2 => MessageType::WireChunk,
@@ -159,8 +160,8 @@ impl From<u16> for MessageType {
             5 => MessageType::Hello,
             6 => MessageType::StreamTags,
             7 => MessageType::ClientInfo,
-            _ => panic!("Illegal message type"),
-        }
+            other => anyhow::bail!("illegal message type {other}"),
+        })
     }
 }
 #[derive(Debug, PartialEq)]
@@ -272,53 +273,62 @@ impl<'a> From<&'a [u8]> for WireChunk<'a> {
         }
     }
 }
-impl<'a> From<&'a [u8]> for Time {
-    fn from(buf: &'a [u8]) -> Time {
-        Time {
+impl TryFrom<&[u8]> for Time {
+    type Error = anyhow::Error;
+    fn try_from(buf: &[u8]) -> anyhow::Result<Time> {
+        anyhow::ensure!(buf.len() >= 8, "short Time payload");
+        Ok(Time {
             latency: TimeVal::from(&buf[0..8]),
-        }
+        })
     }
 }
 
-impl<'a> From<&'a [u8]> for Base {
-    fn from(buf: &'a [u8]) -> Base {
-        let mtype: MessageType = slice_to_u16(&buf[0..2]).into();
-        let id = slice_to_u16(&buf[2..4]);
-        let refers_to = slice_to_u16(&buf[4..6]);
-        let sent_tv = TimeVal::from(&buf[6..14]);
-        let received_tv = TimeVal::from(&buf[14..22]);
+impl TryFrom<&[u8]> for Base {
+    type Error = anyhow::Error;
+    /// Checked header parse for untrusted input: validates the message type and
+    /// bounds the announced payload size, never panicking on garbage.
+    fn try_from(buf: &[u8]) -> anyhow::Result<Base> {
+        anyhow::ensure!(buf.len() >= Base::BASE_SIZE, "short base header");
+        let mtype = MessageType::try_from(slice_to_u16(&buf[0..2]))?;
         let size = slice_to_u32(&buf[22..26]);
-        Base {
+        anyhow::ensure!(
+            size as usize <= Base::MAX_PAYLOAD,
+            "payload size {size} exceeds max"
+        );
+        Ok(Base {
             mtype,
-            id,
-            refers_to,
-            sent_tv,
-            received_tv,
+            id: slice_to_u16(&buf[2..4]),
+            refers_to: slice_to_u16(&buf[4..6]),
+            sent_tv: TimeVal::from(&buf[6..14]),
+            received_tv: TimeVal::from(&buf[14..22]),
             size,
-        }
+        })
     }
 }
 
 impl Base {
     pub const BASE_SIZE: usize = 26;
+    /// Far above any real snapcast message; rejects a garbage length field before
+    /// the caller tries to read gigabytes off the socket.
+    pub const MAX_PAYLOAD: usize = 1 << 20;
 
-    pub fn decode<'a>(&self, payload: &'a [u8]) -> ServerMessage<'a> {
-        match self.mtype {
+    pub fn decode<'a>(&self, payload: &'a [u8]) -> anyhow::Result<ServerMessage<'a>> {
+        Ok(match self.mtype {
             MessageType::CodecHeader => ServerMessage::CodecHeader(CodecHeader::from(payload)),
             MessageType::ServerSettings => {
                 ServerMessage::ServerSettings(ServerSettings::from(payload))
             }
             MessageType::WireChunk => ServerMessage::WireChunk(WireChunk::from(payload)),
-            MessageType::Time => ServerMessage::Time(Time::from(payload)),
-            _ => todo!("didnt get to {:?}", self.mtype),
-        }
+            MessageType::Time => ServerMessage::Time(Time::try_from(payload)?),
+            other => anyhow::bail!("unexpected server message type {other:?}"),
+        })
     }
-    pub fn decode_c<'a>(&self, payload: &'a [u8]) -> ClientMessage<'a> {
-        match self.mtype {
-            MessageType::Hello => ClientMessage::Hello(ClientHello::from(payload)),
-            MessageType::Time => ClientMessage::Time(Time::from(payload)),
-            _ => todo!("didnt get to {:?}", self.mtype),
-        }
+    pub fn decode_c<'a>(&self, payload: &'a [u8]) -> anyhow::Result<ClientMessage<'a>> {
+        Ok(match self.mtype {
+            MessageType::Hello => ClientMessage::Hello(ClientHello::try_from(payload)?),
+            MessageType::Time => ClientMessage::Time(Time::try_from(payload)?),
+            other => anyhow::bail!("unexpected client message type {other:?}"),
+        })
     }
 
     fn write(&self, out: &mut [u8], payload: &[u8]) -> usize {
@@ -549,11 +559,16 @@ pub struct ClientHello<'a> {
     pub ID: &'a str,
     pub SnapStreamProtocolVersion: u8, // this one shouldn't be pub
 }
-impl<'a> From<&'a [u8]> for ClientHello<'a> {
-    fn from(buf: &'a [u8]) -> ClientHello<'a> {
-        let len = slice_to_u32(buf);
-        let c: ClientHello = serde_json::from_slice(&buf[4..len as usize + 4]).unwrap();
-        c
+impl<'a> TryFrom<&'a [u8]> for ClientHello<'a> {
+    type Error = anyhow::Error;
+    /// Fallible parse for untrusted input: a truncated or non-JSON Hello is a
+    /// protocol error rather than a panic.
+    fn try_from(buf: &'a [u8]) -> anyhow::Result<ClientHello<'a>> {
+        anyhow::ensure!(buf.len() >= 4, "short hello");
+        let len = slice_to_u32(buf) as usize;
+        let end = len.checked_add(4).filter(|e| *e <= buf.len());
+        let end = end.ok_or_else(|| anyhow::anyhow!("hello length {len} out of range"))?;
+        Ok(serde_json::from_slice(&buf[4..end])?)
     }
 }
 
@@ -634,7 +649,7 @@ mod tests {
         };
         let buf = &[169, 74, 16, 0, 217, 44, 6, 0];
 
-        assert_eq!(Time::from(buf.as_slice()), expected);
+        assert_eq!(Time::try_from(buf.as_slice()).unwrap(), expected);
     }
 
     #[test]
@@ -657,7 +672,7 @@ mod tests {
             3, 0, 0, 0, 0, 0, 142, 76, 16, 0, 240, 70, 12, 0, 142, 76, 16, 0, 235, 70, 12, 0, 59,
             0, 0, 0,
         ];
-        assert_eq!(Base::from(buf_ss.as_slice()), exp_ss);
+        assert_eq!(Base::try_from(buf_ss.as_slice()).unwrap(), exp_ss);
 
         let exp_ch = Base {
             mtype: MessageType::CodecHeader,
@@ -677,7 +692,7 @@ mod tests {
             1, 0, 0, 0, 0, 0, 142, 76, 16, 0, 16, 71, 12, 0, 40, 30, 15, 0, 252, 29, 1, 0, 55, 0,
             0, 0,
         ];
-        assert_eq!(Base::from(buf_ch.as_slice()), exp_ch);
+        assert_eq!(Base::try_from(buf_ch.as_slice()).unwrap(), exp_ch);
 
         let exp_t = Base {
             mtype: MessageType::Time,
@@ -697,7 +712,7 @@ mod tests {
             4, 0, 0, 0, 0, 0, 142, 76, 16, 0, 21, 72, 12, 0, 142, 76, 16, 0, 4, 72, 12, 0, 8, 0, 0,
             0,
         ];
-        assert_eq!(Base::from(buf_t.as_slice()), exp_t);
+        assert_eq!(Base::try_from(buf_t.as_slice()).unwrap(), exp_t);
 
         let exp_wc = Base {
             mtype: MessageType::WireChunk,
@@ -717,11 +732,14 @@ mod tests {
             2, 0, 0, 0, 0, 0, 142, 76, 16, 0, 130, 74, 12, 0, 142, 76, 16, 0, 124, 74, 12, 0, 140,
             22, 0, 0,
         ];
-        assert_eq!(Base::from(buf_wc.as_slice()), exp_wc);
+        assert_eq!(Base::try_from(buf_wc.as_slice()).unwrap(), exp_wc);
     }
 
     fn split(buf: &[u8]) -> (Base, &[u8]) {
-        (Base::from(&buf[0..Base::BASE_SIZE]), &buf[Base::BASE_SIZE..])
+        (
+            Base::try_from(&buf[0..Base::BASE_SIZE]).unwrap(),
+            &buf[Base::BASE_SIZE..],
+        )
     }
 
     #[test]
@@ -740,7 +758,7 @@ mod tests {
         let buf = hello.as_buf();
         let (base, payload) = split(&buf);
         assert_eq!(base.mtype, MessageType::Hello);
-        match base.decode_c(payload) {
+        match base.decode_c(payload).unwrap() {
             ClientMessage::Hello(h) => assert_eq!(h, hello),
             other => panic!("expected Hello, got {other:?}"),
         }
@@ -748,18 +766,9 @@ mod tests {
 
     #[test]
     fn roundtrip_time_both_roles() {
-        let sent = TimeVal {
-            sec: 12,
-            usec: 345,
-        };
-        let received = TimeVal {
-            sec: 67,
-            usec: 890,
-        };
-        let latency = TimeVal {
-            sec: 1,
-            usec: 500,
-        };
+        let sent = TimeVal { sec: 12, usec: 345 };
+        let received = TimeVal { sec: 67, usec: 890 };
+        let latency = TimeVal { sec: 1, usec: 500 };
 
         // client role: refers_to == 0
         let buf = Time::as_buf(7, 0, sent, received, latency);
@@ -768,7 +777,7 @@ mod tests {
         assert_eq!(base.refers_to, 0);
         assert_eq!(base.sent_tv, sent);
         assert_eq!(base.received_tv, received);
-        assert_eq!(base.decode(payload), ServerMessage::Time(Time { latency }));
+        assert_eq!(base.decode(payload).unwrap(), ServerMessage::Time(Time { latency }));
 
         // server role: refers_to echoes the request id
         let buf = Time::as_buf(5, 42, sent, received, latency);
@@ -777,7 +786,10 @@ mod tests {
         assert_eq!(base.refers_to, 42);
         assert_eq!(base.sent_tv, sent);
         assert_eq!(base.received_tv, received);
-        assert_eq!(base.decode_c(payload), ClientMessage::Time(Time { latency }));
+        assert_eq!(
+            base.decode_c(payload).unwrap(),
+            ClientMessage::Time(Time { latency })
+        );
     }
 
     #[test]
@@ -796,15 +808,12 @@ mod tests {
         let (base, payload) = split(&buf);
         assert_eq!(base.id, 3);
         assert_eq!(base.sent_tv, now);
-        assert_eq!(base.decode(payload), ServerMessage::ServerSettings(ss));
+        assert_eq!(base.decode(payload).unwrap(), ServerMessage::ServerSettings(ss));
     }
 
     #[test]
     fn roundtrip_codec_header_opus() {
-        let now = TimeVal {
-            sec: 9,
-            usec: 8765,
-        };
+        let now = TimeVal { sec: 9, usec: 8765 };
         let ch = CodecHeader {
             codec: "opus",
             metadata: CodecMetadata::Opus(OpusMetadata {
@@ -817,15 +826,12 @@ mod tests {
         let (base, payload) = split(&buf);
         assert_eq!(base.id, 1);
         assert_eq!(base.sent_tv, now);
-        assert_eq!(base.decode(payload), ServerMessage::CodecHeader(ch));
+        assert_eq!(base.decode(payload).unwrap(), ServerMessage::CodecHeader(ch));
     }
 
     #[test]
     fn roundtrip_wire_chunk() {
-        let now = TimeVal {
-            sec: 55,
-            usec: 66,
-        };
+        let now = TimeVal { sec: 55, usec: 66 };
         let ts = TimeVal {
             sec: 1000,
             usec: 2000,
@@ -839,7 +845,7 @@ mod tests {
         let (base, payload) = split(&buf);
         assert_eq!(base.id, 9);
         assert_eq!(base.sent_tv, now);
-        match base.decode(payload) {
+        match base.decode(payload).unwrap() {
             ServerMessage::WireChunk(got) => {
                 assert_eq!(got.timestamp, ts);
                 assert_eq!(got.payload, data.as_slice());

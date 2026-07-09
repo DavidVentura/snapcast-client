@@ -38,8 +38,9 @@ impl Framing {
         }
     }
 
-    pub(crate) fn on_header(&mut self, bytes: &[u8]) {
-        self.state = FramingState::ReadingPacket(Base::from(bytes));
+    pub(crate) fn on_header(&mut self, bytes: &[u8]) -> anyhow::Result<()> {
+        self.state = FramingState::ReadingPacket(Base::try_from(bytes)?);
+        Ok(())
     }
 
     /// Consume the header parsed by the preceding [`Framing::on_header`], leaving

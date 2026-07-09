@@ -50,12 +50,12 @@ impl ServerSession {
     ) -> anyhow::Result<SessionOutput<'a>> {
         match event {
             Event::HeaderReceived(bytes) => {
-                self.framing.on_header(bytes);
+                self.framing.on_header(bytes)?;
                 Ok(SessionOutput::None)
             }
             Event::PacketReceived(bytes) => {
                 let base = self.framing.take_base();
-                match base.decode_c(bytes) {
+                match base.decode_c(bytes)? {
                     ClientMessage::Hello(h) => {
                         self.greeted = true;
                         Ok(SessionOutput::Hello(h))
@@ -217,8 +217,12 @@ mod tests {
             // reply lands back at the client `delay` later, in client time
             let client_recv_us = client_send_us + 2 * delay_us;
             let (hdr, payload) = reply.split_at(Base::BASE_SIZE);
-            client.handle_event(Event::HeaderReceived(hdr), client_recv_us);
-            client.handle_event(Event::PacketReceived(payload), client_recv_us);
+            client
+                .handle_event(Event::HeaderReceived(hdr), client_recv_us)
+                .unwrap();
+            client
+                .handle_event(Event::PacketReceived(payload), client_recv_us)
+                .unwrap();
         }
 
         assert!(client.synchronized());
