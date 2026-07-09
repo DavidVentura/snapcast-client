@@ -47,6 +47,12 @@ impl Pipeline {
         chunk_ms: u32,
         opus_bitrate: i32,
     ) -> anyhow::Result<Pipeline> {
+        // opus only encodes 2.5/5/10/20/40/60ms frames; at 48k those are the only
+        // chunk sizes it will accept, so reject anything else up front
+        anyhow::ensure!(
+            matches!(chunk_ms, 5 | 10 | 20 | 40 | 60),
+            "chunk_ms must be one of 5, 10, 20, 40, 60 (opus frame sizes), got {chunk_ms}"
+        );
         let frame = OUTPUT_RATE * chunk_ms as usize / 1000;
         let resampler =
             FftFixedIn::<f32>::new(SOURCE_RATE, OUTPUT_RATE, RESAMPLE_IN_CHUNK, 2, 2)?;
